@@ -6,24 +6,20 @@ import { setExchangeRate } from './utils/currencyUtils';
 import { setProfitMarginConfig, ProfitMarginConfig } from './utils/profitUtils';
 import { Navbar } from './components/Navbar';
 import { ProductGrid } from './components/ProductGrid';
-import { OrderTrackingSection } from './components/OrderTrackingSection';
-import { WalletPage } from './components/WalletPage';
+import { OrdersHistoryPage } from './components/OrdersHistoryPage';
 import { SettingsPage } from './components/SettingsPage';
-import { AdminDashboard, ADMIN_AUTHORIZED_EMAIL } from './components/AdminDashboard';
+import { AdminDashboard } from './components/AdminDashboard';
 import { AuthPage } from './components/AuthPage';
 import { OrderModal } from './components/OrderModal';
-import { UserHistoryModal } from './components/UserHistoryModal';
 import { BottomNav } from './components/BottomNav';
 import { SplashScreen } from './components/SplashScreen';
-import { NexenLogo } from './components/NexenLogo';
-import { ShieldCheck, Wallet } from 'lucide-react';
 
 export default function App() {
   // Splash Screen initial state
   const [isSplashScreenVisible, setIsSplashScreenVisible] = useState<boolean>(true);
 
-  // Navigation & View state
-  const [activeTab, setActiveTab] = useState<'products' | 'track' | 'wallet' | 'settings' | 'history' | 'auth' | 'admin'>('products');
+  // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track'
+  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track'>('products');
   const [trackingOrderId, setTrackingOrderId] = useState<string>('');
 
   // Theme state (Dark / Light Mode)
@@ -90,7 +86,6 @@ export default function App() {
   const [pendingProductForAuth, setPendingProductForAuth] = useState<Product | null>(null);
   const [selectedProductForOrder, setSelectedProductForOrder] = useState<Product | null>(null);
   const [selectedOrderOptions, setSelectedOrderOptions] = useState<OrderOptions | null>(null);
-  const [isUserHistoryOpen, setIsUserHistoryOpen] = useState<boolean>(false);
 
   // Save auth state to localStorage
   useEffect(() => {
@@ -106,9 +101,30 @@ export default function App() {
     localStorage.setItem('nexen_orders_history', JSON.stringify(orders));
   }, [orders]);
 
-  // Sync saved exchange rate and user orders from Neon DB
+  // Function to refresh orders from Neon DB
+  const refreshUserOrders = useCallback(async () => {
+    if (!currentUser || !currentUser.id) return;
+    try {
+      const dbOrders = await fetchUserOrdersFromDb(currentUser.id);
+      if (dbOrders && dbOrders.length > 0) {
+        setOrders((prev) => {
+          const map = new Map<string, OrderItem>();
+          dbOrders.forEach((o) => map.set(o.orderId, o));
+          prev.forEach((o) => {
+            if (!map.has(o.orderId)) map.set(o.orderId, o);
+          });
+          return Array.from(map.values()).sort(
+            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
+        });
+      }
+    } catch (e) {
+      console.warn('Error refreshing user orders from DB:', e);
+    }
+  }, [currentUser]);
+
+  // Sync saved exchange rate and user orders from Neon DB on mount / user change
   useEffect(() => {
-    // 1. Fetch DB exchange rate & profit margin
     fetchStoreSetting<{ usd_to_syp?: number }>('exchange_rate').then((setting) => {
       if (setting && setting.usd_to_syp && typeof setting.usd_to_syp === 'number') {
         setExchangeRate(setting.usd_to_syp);
@@ -121,26 +137,10 @@ export default function App() {
       }
     }).catch(() => {});
 
-    // 2. Fetch user orders from Neon DB if logged in
     if (currentUser && currentUser.id) {
-      fetchUserOrdersFromDb(currentUser.id).then((dbOrders) => {
-        if (dbOrders && dbOrders.length > 0) {
-          setOrders((prev) => {
-            const map = new Map<string, OrderItem>();
-            // Add DB orders first
-            dbOrders.forEach((o) => map.set(o.orderId, o));
-            // Add any local-only orders
-            prev.forEach((o) => {
-              if (!map.has(o.orderId)) map.set(o.orderId, o);
-            });
-            return Array.from(map.values()).sort(
-              (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-            );
-          });
-        }
-      }).catch(() => {});
+      refreshUserOrders();
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, refreshUserOrders]);
 
   // Load Merchant info
   const loadMerchantData = useCallback(async () => {
@@ -193,7 +193,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Handle product selection (Rule 1: Enforce login before checkout)
+  // Handle product selection (Enforce login before checkout)
   const handleSelectProduct = (product: Product, options?: OrderOptions) => {
     setSelectedOrderOptions(options || null);
     if (!currentUser) {
@@ -221,7 +221,6 @@ export default function App() {
       });
     }
 
-    // If user clicked a product beforehand, redirect to products and open order modal for that product
     if (pendingProductForAuth) {
       const p = pendingProductForAuth;
       setPendingProductForAuth(null);
@@ -255,10 +254,10 @@ export default function App() {
     }
   };
 
-  // Handle navigate to tracking
+  // Handle navigate to tracking / orders
   const handleNavigateToTracking = (orderId: string) => {
     setTrackingOrderId(orderId);
-    setActiveTab('track');
+    setActiveTab('orders');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -275,11 +274,6 @@ export default function App() {
     localStorage.removeItem('nexen_orders_history');
   };
 
-  const handleOpenWallet = () => {
-    setActiveTab('wallet');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F19] text-slate-900 dark:text-slate-100 flex flex-col selection:bg-[#7F00FF] selection:text-white transition-colors duration-200">
       {/* 0. Initial Welcome Splash Screen */}
@@ -291,20 +285,26 @@ export default function App() {
         />
       )}
 
-      {/* Top Navbar */}
+      {/* Top Navbar with Real-time Header Wallet Balance Display */}
       <Navbar
         merchantInfo={merchantInfo}
         isLoadingMerchant={isLoadingMerchant}
         onRefreshMerchant={loadMerchantData}
         currentUser={currentUser}
         onOpenAuth={handleOpenAuth}
-        onOpenUserOrders={() => setIsUserHistoryOpen(true)}
+        onOpenUserOrders={() => {
+          setActiveTab('orders');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
         onOpenSettings={() => {
           setActiveTab('settings');
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={(tab) => {
+          setActiveTab(tab as any);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
         ordersCount={orders.length}
         theme={theme}
         onToggleTheme={handleToggleTheme}
@@ -320,23 +320,17 @@ export default function App() {
             onRefresh={loadProductsData}
             onSelectProduct={handleSelectProduct}
           />
-        ) : activeTab === 'wallet' ? (
-          <WalletPage
-            merchantInfo={merchantInfo}
+        ) : activeTab === 'orders' || activeTab === 'track' ? (
+          <OrdersHistoryPage
             currentUser={currentUser}
             orders={orders}
-            isLoadingMerchant={isLoadingMerchant}
-            onRefreshMerchant={loadMerchantData}
+            onRefreshOrders={refreshUserOrders}
             onNavigateHome={() => {
               setActiveTab('products');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            theme={theme}
-          />
-        ) : activeTab === 'track' ? (
-          <OrderTrackingSection
-            initialOrderId={trackingOrderId}
-            userOrders={orders}
+            onOpenAuth={handleOpenAuth}
+            initialQuery={trackingOrderId}
           />
         ) : activeTab === 'settings' ? (
           <SettingsPage
@@ -349,6 +343,10 @@ export default function App() {
             onDeleteAccount={handleDeleteAccount}
             onNavigateHome={() => {
               setActiveTab('products');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onNavigateOrders={() => {
+              setActiveTab('orders');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onRefreshMerchant={loadMerchantData}
@@ -388,7 +386,7 @@ export default function App() {
         ) : null}
       </main>
 
-      {/* Bottom Floating Navigation Bar */}
+      {/* Bottom Floating Navigation Bar (Clean 3-item layout: Home, Orders, Account) */}
       <BottomNav
         activeTab={activeTab}
         authMode={authMode}
@@ -396,11 +394,14 @@ export default function App() {
           setActiveTab('products');
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
+        onNavigateOrders={() => {
+          setActiveTab('orders');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
         onNavigateLogin={() => handleOpenAuth('login')}
         onNavigateRegister={() => handleOpenAuth('register')}
-        onNavigateWallet={handleOpenWallet}
         onNavigateTrack={() => {
-          setActiveTab('track');
+          setActiveTab('orders');
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onOpenSettings={() => {
@@ -425,101 +426,6 @@ export default function App() {
         onOrderSuccess={handleOrderSuccess}
         onNavigateToTracking={handleNavigateToTracking}
       />
-
-      {/* 2. Customer User History Modal */}
-      <UserHistoryModal
-        isOpen={isUserHistoryOpen}
-        currentUser={currentUser}
-        orders={orders}
-        onClose={() => setIsUserHistoryOpen(false)}
-        onLogout={handleLogout}
-        onTrackOrder={handleNavigateToTracking}
-      />
-
-      {/* Clean Footer */}
-      <footer className="bg-slate-100/70 dark:bg-slate-900/60 border-t border-slate-200/80 dark:border-slate-800/80 mt-12 py-8 px-4 sm:px-8 text-xs text-slate-500 dark:text-slate-400 pb-24 sm:pb-12 transition-colors">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/50 border border-purple-100 dark:border-purple-800/40 flex items-center justify-center p-1 shadow-xs">
-              <NexenLogo size="sm" showText={false} />
-            </div>
-            <div>
-              <span className="font-extrabold text-slate-900 dark:text-white text-sm tracking-tight block">
-                NEXEN STORE
-              </span>
-              <span className="text-[11px] text-slate-400">
-                منصة شحن المنتجات الرقمية والألعاب
-              </span>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-6 text-xs font-semibold text-slate-600 dark:text-slate-300">
-            <button 
-              onClick={() => {
-                setActiveTab('products');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }} 
-              className="hover:text-[#7F00FF] dark:hover:text-purple-300 transition-colors cursor-pointer"
-            >
-              الرئيسية (المنتجات)
-            </button>
-
-            {currentUser ? (
-              <>
-                <button 
-                  onClick={handleOpenWallet} 
-                  className="hover:text-[#7F00FF] dark:hover:text-purple-300 transition-colors cursor-pointer flex items-center gap-1"
-                >
-                  <Wallet className="w-3.5 h-3.5" />
-                  <span>المحفظة</span>
-                </button>
-                <button 
-                  onClick={() => {
-                    setActiveTab('track');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }} 
-                  className="hover:text-[#7F00FF] dark:hover:text-purple-300 transition-colors cursor-pointer"
-                >
-                  تتبع الطلبات
-                </button>
-                <button 
-                  onClick={() => {
-                    setActiveTab('settings');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }} 
-                  className="hover:text-[#7F00FF] dark:hover:text-purple-300 transition-colors cursor-pointer"
-                >
-                  الإعدادات
-                </button>
-              </>
-            ) : (
-              <div className="flex items-center gap-4">
-                <button 
-                  onClick={() => handleOpenAuth('login')} 
-                  className="hover:text-[#7F00FF] dark:hover:text-purple-300 transition-colors cursor-pointer"
-                >
-                  تسجيل الدخول
-                </button>
-                <button 
-                  onClick={() => handleOpenAuth('register')} 
-                  className="hover:text-[#7F00FF] dark:hover:text-purple-300 transition-colors cursor-pointer"
-                >
-                  إنشاء حساب جديد
-                </button>
-              </div>
-            )}
-            <span className="text-slate-300 dark:text-slate-700">|</span>
-            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              خدمة شحن فورية وآمنة
-            </span>
-          </div>
-
-          <div className="text-[11px] text-slate-400 text-center md:text-left">
-            جميع الحقوق محفوظة © {new Date().getFullYear()} Nexen Store
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

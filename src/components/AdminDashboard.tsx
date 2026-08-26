@@ -28,6 +28,7 @@ import {
   X,
   Plus,
   Minus,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { CustomerUser, MerchantInfo, OrderItem } from '../types';
 import {
@@ -57,6 +58,7 @@ interface AdminDashboardProps {
   isLoadingMerchant: boolean;
   onNavigateHome: () => void;
   onNavigateSettings: () => void;
+  onOpenBannerManager?: () => void;
 }
 
 export const ADMIN_AUTHORIZED_EMAIL = 'm74321176@gmail.com';
@@ -68,6 +70,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   isLoadingMerchant,
   onNavigateHome,
   onNavigateSettings,
+  onOpenBannerManager,
 }) => {
   // Active Tab inside Admin Panel
   const [activeAdminTab, setActiveAdminTab] = useState<'stats' | 'users' | 'merchant' | 'profit' | 'order_check'>('stats');
@@ -448,6 +451,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <Search className="w-4 h-4" />
           <span>التحقق من حالة طلب</span>
         </button>
+
+        {onOpenBannerManager && (
+          <button
+            type="button"
+            onClick={onOpenBannerManager}
+            className="flex items-center gap-2 py-3 px-5 rounded-2xl text-xs sm:text-sm font-bold transition-all duration-200 whitespace-nowrap cursor-pointer bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-md shadow-purple-500/20 active:scale-95"
+          >
+            <ImageIcon className="w-4 h-4" />
+            <span>إدارة البنرات الإعلانية 🖼️</span>
+          </button>
+        )}
       </div>
 
       {/* Action Notification Message */}

@@ -1,16 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { 
   Search, 
   AlertCircle, 
   RefreshCw, 
   ArrowRight,
 } from 'lucide-react';
-import { Product } from '../types';
+import { Product, StoreBanner } from '../types';
 import { Breadcrumbs } from './store/Breadcrumbs';
 import { CategoryCard, CategorySummary } from './store/CategoryCard';
 import { GameCard, GameGroup } from './store/GameCard';
 import { PackageCard } from './store/PackageCard';
 import { GamePackagesView } from './store/GamePackagesView';
+import { BannerSlider } from './BannerSlider';
 
 interface ProductGridProps {
   products: Product[];
@@ -18,6 +19,8 @@ interface ProductGridProps {
   error?: string | null;
   onRefresh: () => void;
   onSelectProduct: (product: Product, options?: { playerId?: string; qty?: number }) => void;
+  banners?: StoreBanner[];
+  onOpenBannerManager?: () => void;
 }
 
 export const ProductGrid: React.FC<ProductGridProps> = ({
@@ -26,6 +29,8 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   error,
   onRefresh,
   onSelectProduct,
+  banners = [],
+  onOpenBannerManager,
 }) => {
   // Navigation states for the 3 Tiers
   // Tier 1: selectedCategory === null && selectedGame === null (Home Categories View)
@@ -36,36 +41,36 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Scroll to top on tier transition
-  const scrollToTop = () => {
+  const scrollToTop = useCallback(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, []);
 
   // Handlers for hierarchical navigation
-  const handleNavigateHome = () => {
+  const handleNavigateHome = useCallback(() => {
     setSelectedCategory(null);
     setSelectedGame(null);
     setSearchQuery('');
     scrollToTop();
-  };
+  }, [scrollToTop]);
 
-  const handleSelectCategory = (categoryName: string) => {
+  const handleSelectCategory = useCallback((categoryName: string) => {
     setSelectedCategory(categoryName);
     setSelectedGame(null);
     setSearchQuery('');
     scrollToTop();
-  };
+  }, [scrollToTop]);
 
-  const handleSelectGame = (gameName: string) => {
+  const handleSelectGame = useCallback((gameName: string) => {
     setSelectedGame(gameName);
     setSearchQuery('');
     scrollToTop();
-  };
+  }, [scrollToTop]);
 
-  const handleNavigateBackToCategory = () => {
+  const handleNavigateBackToCategory = useCallback(() => {
     setSelectedGame(null);
     setSearchQuery('');
     scrollToTop();
-  };
+  }, [scrollToTop]);
 
   // 1. Group products by Category (Tier 1 Data)
   const categoriesData = useMemo(() => {
@@ -208,6 +213,15 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         </div>
       )}
 
+      {/* Main Screen Animated Banner Slider (Directly below top header, above search and categories) */}
+      {!selectedCategory && !selectedGame && !searchQuery.trim() && banners && banners.length > 0 && (
+        <BannerSlider
+          banners={banners}
+          onOpenManageModal={onOpenBannerManager}
+          onSelectCategory={handleSelectCategory}
+        />
+      )}
+
       {/* Global & Contextual Search Bar */}
       <div className="relative max-w-2xl mx-auto">
         <input
@@ -303,22 +317,6 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             </div>
           ) : (
             <div className="space-y-5">
-              {/* Category Grid Section Header */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-base sm:text-lg font-black text-[#1A1A1A] dark:text-white flex items-center gap-2">
-                    <span className="w-2.5 h-5 bg-[#7F00FF] rounded-full inline-block" />
-                    <span>الأقسام والخدمات الرقمية</span>
-                  </h2>
-                  <p className="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    اختر القسم لعرض الألعاب والتطبيقات التابعة له
-                  </p>
-                </div>
-                <span className="text-xs font-bold text-[#7F00FF] dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 border border-purple-100 dark:border-purple-800/40 px-2.5 py-0.5 rounded-full hidden sm:inline-block">
-                  {categoriesData.length} أقسام
-                </span>
-              </div>
-
               {/* Grid of Compact Category Cards (3 Cards Per Row on all screens) */}
               <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
                 {categoriesData.map((cat) => (

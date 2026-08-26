@@ -10,7 +10,7 @@ interface PackageCardProps {
   onSelect: (product: Product) => void;
 }
 
-export const PackageCard: React.FC<PackageCardProps> = ({ product, onSelect }) => {
+export const PackageCard: React.FC<PackageCardProps> = React.memo(({ product, onSelect }) => {
   const serviceType = getProductServiceType(product);
   const isCash = serviceType === 'cash' || product.isCash;
   const giftDetails = extractGiftCardDetails(product);
@@ -110,6 +110,8 @@ export const PackageCard: React.FC<PackageCardProps> = ({ product, onSelect }) =
       </div>
     </div>
   );
-};
+});
+
+PackageCard.displayName = 'PackageCard';
 
 

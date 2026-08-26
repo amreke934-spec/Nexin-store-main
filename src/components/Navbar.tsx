@@ -18,7 +18,7 @@ interface NavbarProps {
   onToggleTheme?: (newTheme: 'light' | 'dark') => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({
+export const Navbar: React.FC<NavbarProps> = React.memo(({
   currentUser,
   onOpenAuth,
   onOpenSidebar,
@@ -156,4 +156,6 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
     </header>
   );
-};
+});
+
+Navbar.displayName = 'Navbar';

@@ -19,7 +19,7 @@ interface GameCardProps {
   onSelectGame: (gameName: string) => void;
 }
 
-export const GameCard: React.FC<GameCardProps> = ({ game, onSelectGame }) => {
+export const GameCard: React.FC<GameCardProps> = React.memo(({ game, onSelectGame }) => {
   // Format packages count in natural Arabic
   const formatPackagesCount = (count: number) => {
     if (count === 1) return '1 باقة';
@@ -99,5 +99,7 @@ export const GameCard: React.FC<GameCardProps> = ({ game, onSelectGame }) => {
       </div>
     </div>
   );
-};
+});
+
+GameCard.displayName = 'GameCard';
 

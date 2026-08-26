@@ -40,7 +40,7 @@ interface SidebarDrawerProps {
   ordersCount: number;
 }
 
-export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
+export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
   isOpen,
   onClose,
   currentUser,
@@ -406,4 +406,6 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       </div>
     </div>
   );
-};
+});
+
+SidebarDrawer.displayName = 'SidebarDrawer';

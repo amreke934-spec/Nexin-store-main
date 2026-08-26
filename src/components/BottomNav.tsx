@@ -13,7 +13,7 @@ interface BottomNavProps {
   isLoggedIn: boolean;
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({
+export const BottomNav: React.FC<BottomNavProps> = React.memo(({
   activeTab,
   onNavigateHome,
   onNavigateOrders,
@@ -107,4 +107,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       </div>
     </nav>
   );
-};
+});
+
+BottomNav.displayName = 'BottomNav';

@@ -107,6 +107,23 @@
   scrollbar-width: none;
 }
 
+/* Performance & Hardware Acceleration Enhancements */
+.gpu-layer {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* Image rendering optimizations */
+img {
+  content-visibility: auto;
+}
+
+/* Smooth layout and fast interactions */
+button, a {
+  touch-action: manipulation;
+}
+
 /* Touch & Mobile Optimizations */
 @media (max-width: 640px) {
   body {

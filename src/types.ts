@@ -96,3 +96,17 @@ export interface OrderItem {
 export interface OrderTrackingQuery {
   orderIds: string;
 }
+
+export interface StoreBanner {
+  id: string;
+  title: string;
+  subtitle?: string;
+  imageUrl: string;
+  linkUrl?: string;
+  actionType?: 'url' | 'category' | 'none';
+  targetCategory?: string;
+  badgeText?: string;
+  isActive?: boolean;
+  order?: number;
+}
+

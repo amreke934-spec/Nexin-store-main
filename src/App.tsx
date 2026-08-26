@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { MerchantInfo, Product, CustomerUser, OrderItem, OrderOptions } from './types';
+import { MerchantInfo, Product, CustomerUser, OrderItem, OrderOptions, StoreBanner } from './types';
 import { fetchMerchantInfo, fetchProducts } from './services/scStoreApi';
-import { fetchUserOrdersFromDb, fetchStoreSetting } from './services/dbApi';
+import { fetchUserOrdersFromDb, fetchStoreSetting, saveStoreSetting } from './services/dbApi';
 import { setExchangeRate } from './utils/currencyUtils';
 import { setProfitMarginConfig, ProfitMarginConfig } from './utils/profitUtils';
+import { getSavedBanners, saveBannersLocally } from './data/defaultBanners';
 import { Navbar } from './components/Navbar';
 import { ProductGrid } from './components/ProductGrid';
 import { OrdersHistoryPage } from './components/OrdersHistoryPage';
@@ -16,6 +17,7 @@ import { SplashScreen } from './components/SplashScreen';
 import { SidebarDrawer } from './components/SidebarDrawer';
 import { SupportPage } from './components/SupportPage';
 import { AboutPage } from './components/AboutPage';
+import { BannerManagementModal } from './components/BannerManagementModal';
 
 export default function App() {
   // Splash Screen initial state
@@ -23,6 +25,10 @@ export default function App() {
 
   // Sidebar Drawer state
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+
+  // Banner Slider State & Management
+  const [banners, setBanners] = useState<StoreBanner[]>(() => getSavedBanners());
+  const [isBannerModalOpen, setIsBannerModalOpen] = useState<boolean>(false);
 
   // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track' | 'support' | 'about' | 'checkout'
   const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track' | 'support' | 'about' | 'checkout'>('products');
@@ -143,10 +149,25 @@ export default function App() {
       }
     }).catch(() => {});
 
+    // Sync Store Banners from Neon DB / API
+    fetchStoreSetting<StoreBanner[]>('store_banners').then((savedBanners) => {
+      if (savedBanners && Array.isArray(savedBanners) && savedBanners.length > 0) {
+        setBanners(savedBanners);
+        saveBannersLocally(savedBanners);
+      }
+    }).catch(() => {});
+
     if (currentUser && currentUser.id) {
       refreshUserOrders();
     }
   }, [currentUser?.id, refreshUserOrders]);
+
+  // Handle saving and persisting store banners
+  const handleSaveBanners = (updatedBanners: StoreBanner[]) => {
+    setBanners(updatedBanners);
+    saveBannersLocally(updatedBanners);
+    saveStoreSetting('store_banners', updatedBanners);
+  };
 
   // Load Merchant info
   const loadMerchantData = useCallback(async () => {
@@ -200,7 +221,7 @@ export default function App() {
   }, []);
 
   // Handle product selection (Enforce login before checkout, navigate to dedicated checkout screen)
-  const handleSelectProduct = (product: Product, options?: OrderOptions) => {
+  const handleSelectProduct = useCallback((product: Product, options?: OrderOptions) => {
     setSelectedOrderOptions(options || null);
     if (!currentUser) {
       setPendingProductForAuth(product);
@@ -211,10 +232,10 @@ export default function App() {
       setActiveTab('checkout');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  };
+  }, [currentUser]);
 
   // Handle successful login from full-page view
-  const handleLoginSuccess = (user: CustomerUser, userOrders?: OrderItem[]) => {
+  const handleLoginSuccess = useCallback((user: CustomerUser, userOrders?: OrderItem[]) => {
     setCurrentUser(user);
     if (userOrders && userOrders.length > 0) {
       setOrders((prev) => {
@@ -239,10 +260,10 @@ export default function App() {
       setActiveTab('products');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  };
+  }, [pendingProductForAuth]);
 
   // Handle successful order creation
-  const handleOrderSuccess = (newOrder: OrderItem) => {
+  const handleOrderSuccess = useCallback((newOrder: OrderItem) => {
     setOrders((prev) => [newOrder, ...prev]);
     // Refresh merchant balance if applicable
     if (merchantInfo && merchantInfo.balance >= newOrder.total) {
@@ -258,27 +279,29 @@ export default function App() {
     } else {
       loadMerchantData();
     }
-  };
+  }, [merchantInfo, loadMerchantData]);
 
   // Handle navigate to tracking / orders
-  const handleNavigateToTracking = (orderId: string) => {
+  const handleNavigateToTracking = useCallback((orderId: string) => {
     setTrackingOrderId(orderId);
     setActiveTab('orders');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, []);
 
   // Logout handler
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     setCurrentUser(null);
-  };
+  }, []);
 
   // Delete account handler
-  const handleDeleteAccount = () => {
+  const handleDeleteAccount = useCallback(() => {
     setCurrentUser(null);
     setOrders([]);
     localStorage.removeItem('nexen_user_session');
     localStorage.removeItem('nexen_orders_history');
-  };
+    setActiveTab('products');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F19] text-slate-900 dark:text-slate-100 flex flex-col selection:bg-[#7F00FF] selection:text-white transition-colors duration-200">
@@ -346,6 +369,8 @@ export default function App() {
             error={productsError}
             onRefresh={loadProductsData}
             onSelectProduct={handleSelectProduct}
+            banners={banners}
+            onOpenBannerManager={() => setIsBannerModalOpen(true)}
           />
         ) : activeTab === 'orders' || activeTab === 'track' ? (
           <OrdersHistoryPage
@@ -407,6 +432,7 @@ export default function App() {
             merchantInfo={merchantInfo}
             onRefreshMerchant={loadMerchantData}
             isLoadingMerchant={isLoadingMerchant}
+            onOpenBannerManager={() => setIsBannerModalOpen(true)}
             onNavigateHome={() => {
               setActiveTab('products');
               window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -473,6 +499,14 @@ export default function App() {
         }}
         ordersCount={orders.length}
         isLoggedIn={!!currentUser}
+      />
+
+      {/* Banner Upload & Management Modal */}
+      <BannerManagementModal
+        isOpen={isBannerModalOpen}
+        onClose={() => setIsBannerModalOpen(false)}
+        banners={banners}
+        onSaveBanners={handleSaveBanners}
       />
     </div>
   );

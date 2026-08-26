@@ -79,7 +79,7 @@ const CATEGORY_VISUALS: Record<string, {
   },
 };
 
-export const CategoryCard: React.FC<CategoryCardProps> = ({
+export const CategoryCard: React.FC<CategoryCardProps> = React.memo(({
   category,
   onSelectCategory,
 }) => {
@@ -142,4 +142,6 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({
       </div>
     </div>
   );
-};
+});
+
+CategoryCard.displayName = 'CategoryCard';

@@ -254,13 +254,13 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
 
       {/* Loading Skeletons */}
       {isLoading && products.length === 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-            <div key={i} className="bg-white dark:bg-[#151221] border border-gray-100 dark:border-white/10 rounded-2xl p-4 animate-pulse space-y-3">
-              <div className="w-10 h-10 bg-gray-200 dark:bg-white/10 rounded-xl" />
-              <div className="h-4 bg-gray-200 dark:bg-white/10 rounded w-2/3" />
-              <div className="h-3 bg-gray-200 dark:bg-white/10 rounded w-full" />
-              <div className="h-8 bg-gray-200 dark:bg-white/10 rounded-xl mt-2" />
+        <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => (
+            <div key={i} className="bg-white dark:bg-[#151221] border border-gray-100 dark:border-white/10 rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 animate-pulse space-y-2.5">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gray-200 dark:bg-white/10 rounded-lg sm:rounded-xl" />
+              <div className="h-3.5 bg-gray-200 dark:bg-white/10 rounded w-2/3" />
+              <div className="h-2.5 bg-gray-200 dark:bg-white/10 rounded w-full" />
+              <div className="h-6 bg-gray-200 dark:bg-white/10 rounded-lg mt-2" />
             </div>
           ))}
         </div>
@@ -284,7 +284,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
               </div>
 
               {globalSearchResults.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+                <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
                   {globalSearchResults.map((prod) => (
                     <PackageCard
                       key={prod.id}
@@ -319,8 +319,8 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
                 </span>
               </div>
 
-              {/* Grid of Compact Category Cards */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+              {/* Grid of Compact Category Cards (3 Cards Per Row on all screens) */}
+              <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
                 {categoriesData.map((cat) => (
                   <CategoryCard
                     key={cat.name}
@@ -360,10 +360,10 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             </button>
           </div>
 
-          {/* Games / Apps Grid */}
+          {/* Games / Apps Grid (3 Cards Per Row) */}
           <div className="space-y-3">
             {gamesInCategory.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+              <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
                 {gamesInCategory.map((game) => (
                   <GameCard
                     key={game.gameName}

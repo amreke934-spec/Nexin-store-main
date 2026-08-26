@@ -10,16 +10,22 @@ import { OrdersHistoryPage } from './components/OrdersHistoryPage';
 import { SettingsPage } from './components/SettingsPage';
 import { AdminDashboard } from './components/AdminDashboard';
 import { AuthPage } from './components/AuthPage';
-import { OrderModal } from './components/OrderModal';
+import { CheckoutPage } from './components/CheckoutPage';
 import { BottomNav } from './components/BottomNav';
 import { SplashScreen } from './components/SplashScreen';
+import { SidebarDrawer } from './components/SidebarDrawer';
+import { SupportPage } from './components/SupportPage';
+import { AboutPage } from './components/AboutPage';
 
 export default function App() {
   // Splash Screen initial state
   const [isSplashScreenVisible, setIsSplashScreenVisible] = useState<boolean>(true);
 
-  // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track'
-  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track'>('products');
+  // Sidebar Drawer state
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+
+  // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track' | 'support' | 'about' | 'checkout'
+  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track' | 'support' | 'about' | 'checkout'>('products');
   const [trackingOrderId, setTrackingOrderId] = useState<string>('');
 
   // Theme state (Dark / Light Mode)
@@ -193,7 +199,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Handle product selection (Enforce login before checkout)
+  // Handle product selection (Enforce login before checkout, navigate to dedicated checkout screen)
   const handleSelectProduct = (product: Product, options?: OrderOptions) => {
     setSelectedOrderOptions(options || null);
     if (!currentUser) {
@@ -202,6 +208,8 @@ export default function App() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
       setSelectedProductForOrder(product);
+      setActiveTab('checkout');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
@@ -224,11 +232,9 @@ export default function App() {
     if (pendingProductForAuth) {
       const p = pendingProductForAuth;
       setPendingProductForAuth(null);
-      setActiveTab('products');
+      setSelectedProductForOrder(p);
+      setActiveTab('checkout');
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      setTimeout(() => {
-        setSelectedProductForOrder(p);
-      }, 100);
     } else {
       setActiveTab('products');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -285,7 +291,7 @@ export default function App() {
         />
       )}
 
-      {/* Top Navbar with Real-time Header Wallet Balance Display */}
+      {/* Top Navbar with Real-time Header Wallet Balance Display & Sidebar Trigger */}
       <Navbar
         merchantInfo={merchantInfo}
         isLoadingMerchant={isLoadingMerchant}
@@ -300,6 +306,7 @@ export default function App() {
           setActiveTab('settings');
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
+        onOpenSidebar={() => setIsSidebarOpen(true)}
         activeTab={activeTab}
         setActiveTab={(tab) => {
           setActiveTab(tab as any);
@@ -308,6 +315,26 @@ export default function App() {
         ordersCount={orders.length}
         theme={theme}
         onToggleTheme={handleToggleTheme}
+      />
+
+      {/* Sidebar / Drawer Navigation Overlay */}
+      <SidebarDrawer
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        currentUser={currentUser}
+        merchantInfo={merchantInfo}
+        isLoadingMerchant={isLoadingMerchant}
+        onRefreshMerchant={loadMerchantData}
+        activeTab={activeTab}
+        onNavigate={(tab) => {
+          setActiveTab(tab as any);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onOpenAuth={handleOpenAuth}
+        onLogout={handleLogout}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        ordersCount={orders.length}
       />
 
       {/* Main Content Area */}
@@ -331,6 +358,24 @@ export default function App() {
             }}
             onOpenAuth={handleOpenAuth}
             initialQuery={trackingOrderId}
+          />
+        ) : activeTab === 'support' ? (
+          <SupportPage
+            onNavigateHome={() => {
+              setActiveTab('products');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        ) : activeTab === 'about' ? (
+          <AboutPage
+            onNavigateHome={() => {
+              setActiveTab('products');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onNavigateSupport={() => {
+              setActiveTab('support');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
           />
         ) : activeTab === 'settings' ? (
           <SettingsPage
@@ -383,6 +428,24 @@ export default function App() {
             initialMode={authMode}
             theme={theme}
           />
+        ) : activeTab === 'checkout' && selectedProductForOrder ? (
+          <CheckoutPage
+            product={selectedProductForOrder}
+            currentUser={currentUser}
+            orderOptions={selectedOrderOptions}
+            onBack={() => {
+              setActiveTab('products');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOrderSuccess={handleOrderSuccess}
+            onNavigateToTracking={handleNavigateToTracking}
+            onNavigateHome={() => {
+              setSelectedProductForOrder(null);
+              setSelectedOrderOptions(null);
+              setActiveTab('products');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
         ) : null}
       </main>
 
@@ -410,21 +473,6 @@ export default function App() {
         }}
         ordersCount={orders.length}
         isLoggedIn={!!currentUser}
-      />
-
-      {/* Modals */}
-      {/* 1. Order / Checkout Modal (Player ID input) */}
-      <OrderModal
-        isOpen={!!selectedProductForOrder}
-        product={selectedProductForOrder}
-        currentUser={currentUser}
-        orderOptions={selectedOrderOptions}
-        onClose={() => {
-          setSelectedProductForOrder(null);
-          setSelectedOrderOptions(null);
-        }}
-        onOrderSuccess={handleOrderSuccess}
-        onNavigateToTracking={handleNavigateToTracking}
       />
     </div>
   );

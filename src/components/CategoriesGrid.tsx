@@ -103,11 +103,11 @@ export const CategoriesGrid: React.FC<CategoriesGridProps> = ({
         )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
         {/* All Products Card */}
         <div
           onClick={() => onSelectCategory('all')}
-          className={`group relative overflow-hidden rounded-2xl p-4 sm:p-5 flex flex-col justify-between min-h-[140px] sm:min-h-[150px] cursor-pointer transition-all duration-300 border ${
+          className={`group relative overflow-hidden rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 md:p-4 flex flex-col justify-between min-h-[115px] sm:min-h-[135px] md:min-h-[150px] cursor-pointer transition-all duration-300 border ${
             selectedCategory === 'all'
               ? 'bg-gradient-to-br from-[#24133d] via-[#1a112c] to-[#120c22] border-[#7F00FF] shadow-lg shadow-[#7F00FF]/25 ring-2 ring-[#7F00FF]/40 -translate-y-0.5'
               : 'bg-gradient-to-br from-[#181424] via-[#13101e] to-[#0c0a13] border-white/10 hover:border-[#7F00FF]/60 hover:shadow-md hover:shadow-[#7F00FF]/15 hover:-translate-y-0.5'
@@ -117,28 +117,28 @@ export const CategoriesGrid: React.FC<CategoriesGridProps> = ({
           <div className="absolute -top-10 -left-10 w-24 h-24 bg-[#7F00FF]/20 rounded-full blur-xl group-hover:bg-[#7F00FF]/35 transition-all pointer-events-none" />
 
           {/* Top Row: Icon & Count Badge */}
-          <div className="relative z-10 flex items-start justify-between">
+          <div className="relative z-10 flex items-start justify-between gap-1">
             <div
-              className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center transition-transform duration-300 group-hover:scale-105 ${
+              className={`w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 rounded-lg sm:rounded-xl flex items-center justify-center transition-transform duration-300 group-hover:scale-105 shrink-0 ${
                 selectedCategory === 'all'
                   ? 'bg-[#7F00FF] text-white shadow-md shadow-[#7F00FF]/40'
                   : 'bg-white/10 text-purple-300 group-hover:bg-[#7F00FF] group-hover:text-white'
               }`}
             >
-              <Sparkles className="w-5 h-5" />
+              <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5" />
             </div>
 
-            <span className="text-[10px] sm:text-[11px] font-mono font-bold px-2 py-0.5 rounded-full bg-white/10 text-purple-200 border border-white/10">
+            <span className="text-[8px] sm:text-[9px] md:text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-white/10 text-purple-200 border border-white/10 leading-none">
               {totalProductsCount} منتج
             </span>
           </div>
 
           {/* Bottom Info */}
-          <div className="relative z-10 mt-3">
-            <h3 className="font-extrabold text-sm sm:text-base text-white group-hover:text-purple-200 transition-colors">
+          <div className="relative z-10 mt-2 sm:mt-2.5">
+            <h3 className="font-extrabold text-[11px] sm:text-xs md:text-sm lg:text-base text-white group-hover:text-purple-200 transition-colors line-clamp-1 leading-tight">
               جميع الأقسام
             </h3>
-            <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">
+            <p className="text-[8.5px] sm:text-[9.5px] md:text-[11px] text-gray-400 line-clamp-1 mt-0.5">
               تصفح كافة الألعاب والاشتراكات
             </p>
           </div>
@@ -158,7 +158,7 @@ export const CategoriesGrid: React.FC<CategoriesGridProps> = ({
             <div
               key={cat.name}
               onClick={() => onSelectCategory(cat.name)}
-              className={`group relative overflow-hidden rounded-2xl p-4 sm:p-5 flex flex-col justify-between min-h-[140px] sm:min-h-[150px] cursor-pointer transition-all duration-300 border ${
+              className={`group relative overflow-hidden rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 md:p-4 flex flex-col justify-between min-h-[115px] sm:min-h-[135px] md:min-h-[150px] cursor-pointer transition-all duration-300 border ${
                 isSelected
                   ? 'bg-gradient-to-br from-[#24133d] via-[#1a112c] to-[#120c22] border-[#7F00FF] shadow-lg shadow-[#7F00FF]/25 ring-2 ring-[#7F00FF]/40 -translate-y-0.5'
                   : 'bg-gradient-to-br from-[#181424] via-[#13101e] to-[#0c0a13] border-white/10 hover:border-[#7F00FF]/60 hover:shadow-md hover:shadow-[#7F00FF]/15 hover:-translate-y-0.5'
@@ -179,23 +179,23 @@ export const CategoriesGrid: React.FC<CategoriesGridProps> = ({
               <div className="absolute -top-10 -left-10 w-24 h-24 bg-[#7F00FF]/15 rounded-full blur-xl group-hover:bg-[#7F00FF]/30 transition-all pointer-events-none" />
 
               {/* Top Row: Icon & Count / Badge */}
-              <div className="relative z-10 flex items-start justify-between">
+              <div className="relative z-10 flex items-start justify-between gap-1">
                 <div
-                  className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center transition-transform duration-300 group-hover:scale-105 ${
+                  className={`w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 rounded-lg sm:rounded-xl flex items-center justify-center transition-transform duration-300 group-hover:scale-105 shrink-0 ${
                     isSelected
                       ? 'bg-[#7F00FF] text-white shadow-md shadow-[#7F00FF]/40'
                       : 'bg-white/10 text-purple-300 group-hover:bg-[#7F00FF] group-hover:text-white'
                   }`}
                 >
-                  <IconComponent className="w-5 h-5" />
+                  <IconComponent className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5" />
                 </div>
 
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-[10px] sm:text-[11px] font-mono font-bold px-2 py-0.5 rounded-full bg-white/10 text-purple-200 border border-white/10">
+                <div className="flex flex-col items-end gap-0.5 sm:gap-1">
+                  <span className="text-[8px] sm:text-[9px] md:text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-white/10 text-purple-200 border border-white/10 leading-none">
                     {cat.count} باقة
                   </span>
                   {visual.badge && (
-                    <span className="text-[9px] font-bold px-1.5 py-0.2 bg-[#7F00FF]/80 text-white rounded-md">
+                    <span className="text-[7.5px] sm:text-[8.5px] font-bold px-1.5 py-0.5 bg-[#7F00FF]/80 text-white rounded-md leading-none">
                       {visual.badge}
                     </span>
                   )}
@@ -203,11 +203,11 @@ export const CategoriesGrid: React.FC<CategoriesGridProps> = ({
               </div>
 
               {/* Bottom Info */}
-              <div className="relative z-10 mt-3">
-                <h3 className="font-extrabold text-sm sm:text-base text-white group-hover:text-purple-200 transition-colors">
+              <div className="relative z-10 mt-2 sm:mt-2.5">
+                <h3 className="font-extrabold text-[11px] sm:text-xs md:text-sm lg:text-base text-white group-hover:text-purple-200 transition-colors line-clamp-1 leading-tight">
                   {cat.name}
                 </h3>
-                <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">
+                <p className="text-[8.5px] sm:text-[9.5px] md:text-[11px] text-gray-400 line-clamp-1 mt-0.5">
                   {visual.description}
                 </p>
               </div>

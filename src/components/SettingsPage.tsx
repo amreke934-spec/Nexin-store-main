@@ -7,15 +7,13 @@ import {
   Hash,
   LogOut,
   LogIn,
-  ShoppingBag,
-  ArrowRight,
   ShieldCheck,
   Calendar,
   Copy,
   Check,
   ShieldAlert,
   Sliders,
-  Package,
+  ArrowRight,
 } from 'lucide-react';
 import { CustomerUser, MerchantInfo } from '../types';
 import { ADMIN_AUTHORIZED_EMAIL } from './AdminDashboard';
@@ -28,7 +26,7 @@ interface SettingsPageProps {
   onOpenAuth?: () => void;
   onLogout: () => void;
   onDeleteAccount?: () => void;
-  onNavigateHome: () => void;
+  onNavigateHome?: () => void;
   onNavigateOrders?: () => void;
   onRefreshMerchant?: () => void;
   isLoadingMerchant?: boolean;
@@ -39,8 +37,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   currentUser,
   onOpenAuth,
   onLogout,
-  onNavigateHome,
-  onNavigateOrders,
   onOpenAdmin,
 }) => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -57,13 +53,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     setTimeout(() => {
       setCopiedField(null);
     }, 2000);
-  };
-
-  const handleBrowseAsGuest = () => {
-    if (currentUser) {
-      onLogout();
-    }
-    onNavigateHome();
   };
 
   const isLoggedIn = !!currentUser && !!currentUser.id;
@@ -258,42 +247,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               </div>
             )}
 
-            {/* Action Buttons for Logged In User */}
-            <div className="pt-4 border-t border-gray-100 dark:border-white/10 flex flex-col sm:flex-row items-center gap-3">
-              {/* Button: View Orders */}
-              {onNavigateOrders && (
-                <button
-                  type="button"
-                  id="settings-view-orders-btn"
-                  onClick={onNavigateOrders}
-                  className="w-full sm:w-1/3 py-3 px-4 rounded-2xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/60 text-[#7F00FF] dark:text-purple-300 border border-purple-200/80 dark:border-purple-800/60 text-xs sm:text-sm font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Package className="w-4 h-4" />
-                  <span>سجل طلباتي</span>
-                </button>
-              )}
-
-              {/* Button: Logout */}
+            {/* Action Buttons for Logged In User: Clean Logout Button */}
+            <div className="pt-4 border-t border-gray-100 dark:border-white/10">
               <button
                 type="button"
                 id="logout-btn"
                 onClick={onLogout}
-                className={`w-full ${onNavigateOrders ? 'sm:w-1/3' : 'sm:w-1/2'} py-3 px-4 rounded-2xl bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800/50 text-xs sm:text-sm font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer group`}
+                className="w-full py-3.5 px-5 rounded-2xl bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800/50 text-xs sm:text-sm font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer group"
               >
                 <LogOut className="w-4 h-4 text-red-500 group-hover:-translate-x-0.5 transition-transform" />
-                <span>تسجيل الخروج</span>
-              </button>
-
-              {/* Button: Return to Store */}
-              <button
-                type="button"
-                id="settings-back-store-btn"
-                onClick={onNavigateHome}
-                className={`w-full ${onNavigateOrders ? 'sm:w-1/3' : 'sm:w-1/2'} py-3 px-4 rounded-2xl bg-[#7F00FF] hover:bg-[#6b00d6] active:scale-98 text-white text-xs sm:text-sm font-bold transition-all shadow-md shadow-[#7F00FF]/25 flex items-center justify-center gap-2 cursor-pointer`}
-              >
-                <ShoppingBag className="w-4 h-4" />
-                <span>العودة للمتجر</span>
-                <ArrowRight className="w-4 h-4 mr-0.5" />
+                <span>تسجيل الخروج من الحساب</span>
               </button>
             </div>
           </div>
@@ -309,36 +272,24 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   أنت تتصفح المتجر كـ زائر حالياً
                 </h4>
                 <p className="text-xs text-purple-800/80 dark:text-purple-300/80 mt-0.5">
-                  سجّل دخولك لحفظ مشترياتك في قاعدة البيانات، ومتابعة طلباتك، والوصول الفوري لمحفظتك.
+                  سجّل دخولك لحفظ مشترياتك في قاعدة البيانات، ومتابعة طلباتك، والوصول الفوري لحسابك.
                 </p>
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-center gap-3.5">
+            <div>
               {/* Button: تسجيل الدخول أو إنشاء حساب */}
               {onOpenAuth && (
                 <button
                   type="button"
                   id="settings-open-auth-btn"
                   onClick={onOpenAuth}
-                  className="w-full sm:w-1/2 py-3.5 px-5 rounded-2xl bg-[#7F00FF] hover:bg-[#6b00d6] active:scale-98 text-white text-xs sm:text-sm font-bold transition-all shadow-md shadow-[#7F00FF]/25 flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3.5 px-5 rounded-2xl bg-[#7F00FF] hover:bg-[#6b00d6] active:scale-98 text-white text-xs sm:text-sm font-bold transition-all shadow-md shadow-[#7F00FF]/25 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <LogIn className="w-4 h-4" />
                   <span>تسجيل الدخول / إنشاء حساب</span>
                 </button>
               )}
-
-              {/* Button: تصفح كـ زائر والعودة للمتجر */}
-              <button
-                type="button"
-                id="browse-as-guest-btn"
-                onClick={handleBrowseAsGuest}
-                className={`w-full ${onOpenAuth ? 'sm:w-1/2' : 'sm:w-full'} py-3.5 px-5 rounded-2xl bg-slate-100 dark:bg-slate-800/80 hover:bg-purple-50 hover:text-[#7F00FF] dark:hover:bg-purple-950/50 dark:hover:text-purple-300 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700/80 text-xs sm:text-sm font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer group`}
-              >
-                <User className="w-4 h-4 text-slate-500 group-hover:text-[#7F00FF] dark:text-slate-400 dark:group-hover:text-purple-300 transition-colors" />
-                <span>تصفح كـ زائر (العودة للمتجر)</span>
-                <ArrowRight className="w-4 h-4 mr-0.5" />
-              </button>
             </div>
           </div>
         )}
@@ -346,3 +297,4 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     </div>
   );
 };
+

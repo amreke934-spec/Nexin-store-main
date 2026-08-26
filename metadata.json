@@ -1,0 +1,6 @@
+{
+  "name": "Nexen Store",
+  "description": "متجر نكسن الرقمي لبيع وشحن المنتجات الرقمية والألعاب المتصل بـ SC Store API",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Package, LayoutGrid, LogIn, Menu, Headphones, Info } from 'lucide-react';
+import { Settings, Package, LayoutGrid, Menu, Info, LogIn } from 'lucide-react';
 import { MerchantInfo, CustomerUser } from '../types';
 
 interface NavbarProps {
@@ -11,8 +11,8 @@ interface NavbarProps {
   onOpenUserOrders: () => void;
   onOpenSettings?: () => void;
   onOpenSidebar: () => void;
-  activeTab: 'products' | 'orders' | 'track' | 'settings' | 'history' | 'auth' | 'admin' | 'support' | 'about' | string;
-  setActiveTab: (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'support' | 'about') => void;
+  activeTab: 'products' | 'orders' | 'track' | 'settings' | 'history' | 'auth' | 'admin' | 'about' | string;
+  setActiveTab: (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about') => void;
   ordersCount: number;
   theme?: 'light' | 'dark';
   onToggleTheme?: (newTheme: 'light' | 'dark') => void;
@@ -82,19 +82,6 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
                     {ordersCount}
                   </span>
                 )}
-              </button>
-
-              <button
-                id="nav-support-tab"
-                onClick={() => setActiveTab('support')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'support'
-                    ? 'bg-white dark:bg-[#7F00FF] text-[#7F00FF] dark:text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Headphones className="w-3.5 h-3.5 text-emerald-500" />
-                <span>الدعم الفني</span>
               </button>
 
               <button

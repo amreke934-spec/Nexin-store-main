@@ -31,7 +31,7 @@ interface OrdersHistoryPageProps {
   initialQuery?: string;
 }
 
-export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = ({
+export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = React.memo(({
   currentUser,
   orders,
   onRefreshOrders,
@@ -505,4 +505,7 @@ export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = ({
 
     </div>
   );
-};
+});
+
+OrdersHistoryPage.displayName = 'OrdersHistoryPage';
+

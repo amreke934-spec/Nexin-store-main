@@ -33,7 +33,7 @@ interface SettingsPageProps {
   onOpenAdmin?: () => void;
 }
 
-export const SettingsPage: React.FC<SettingsPageProps> = ({
+export const SettingsPage: React.FC<SettingsPageProps> = React.memo(({
   currentUser,
   onOpenAuth,
   onLogout,
@@ -296,5 +296,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       </div>
     </div>
   );
-};
+});
+
+SettingsPage.displayName = 'SettingsPage';
+
 

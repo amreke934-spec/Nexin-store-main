@@ -19,7 +19,7 @@ interface GamePackagesViewProps {
   onSelectProduct: (product: Product, options?: { playerId?: string; qty?: number }) => void;
 }
 
-export const GamePackagesView: React.FC<GamePackagesViewProps> = ({
+export const GamePackagesView: React.FC<GamePackagesViewProps> = React.memo(({
   gameName,
   categoryName,
   packages,
@@ -222,5 +222,8 @@ export const GamePackagesView: React.FC<GamePackagesViewProps> = ({
       </div>
     </div>
   );
-};
+});
+
+GamePackagesView.displayName = 'GamePackagesView';
+
 

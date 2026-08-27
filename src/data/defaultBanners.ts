@@ -344,7 +344,24 @@ export function getSavedBanners(): StoreBanner[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        // Ensure Telegram banner always points to https://t.me/nexen_store
+        return parsed.map((b: StoreBanner) => {
+          if (
+            b.id === 'banner-telegram' || 
+            b.title?.includes('تيليجرام') || 
+            b.subtitle?.includes('قناتنا') ||
+            b.badgeText?.includes('تيليجرام') ||
+            (b.linkUrl && b.linkUrl.includes('t.me'))
+          ) {
+            return {
+              ...b,
+              linkUrl: 'https://t.me/nexen_store',
+              actionType: 'url',
+              badgeText: b.badgeText || 'انضم لقناة التيليجرام ✈️',
+            };
+          }
+          return b;
+        });
       }
     }
   } catch (e) {

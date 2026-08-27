@@ -23,7 +23,7 @@ interface ProductGridProps {
   onOpenBannerManager?: () => void;
 }
 
-export const ProductGrid: React.FC<ProductGridProps> = ({
+export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
   products,
   isLoading,
   error,
@@ -403,4 +403,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
       )}
     </div>
   );
-};
+});
+
+ProductGrid.displayName = 'ProductGrid';
+

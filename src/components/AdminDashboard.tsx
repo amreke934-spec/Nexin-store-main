@@ -63,7 +63,7 @@ interface AdminDashboardProps {
 
 export const ADMIN_AUTHORIZED_EMAIL = 'm74321176@gmail.com';
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({
+export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
   currentUser,
   merchantInfo,
   onRefreshMerchant,
@@ -1439,4 +1439,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
     </div>
   );
-};
+});
+
+AdminDashboard.displayName = 'AdminDashboard';
+

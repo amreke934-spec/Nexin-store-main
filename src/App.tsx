@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, startTransition } from 'react';
 import { MerchantInfo, Product, CustomerUser, OrderItem, OrderOptions, StoreBanner } from './types';
 import { fetchMerchantInfo, fetchProducts } from './services/scStoreApi';
 import { fetchUserOrdersFromDb, fetchStoreSetting, saveStoreSetting } from './services/dbApi';
 import { setExchangeRate } from './utils/currencyUtils';
 import { setProfitMarginConfig, ProfitMarginConfig } from './utils/profitUtils';
 import { getSavedBanners, saveBannersLocally } from './data/defaultBanners';
+import { getInitialTheme, applyTheme, ThemeMode } from './utils/themeUtils';
 import { Navbar } from './components/Navbar';
 import { ProductGrid } from './components/ProductGrid';
 import { OrdersHistoryPage } from './components/OrdersHistoryPage';
@@ -15,9 +16,9 @@ import { CheckoutPage } from './components/CheckoutPage';
 import { BottomNav } from './components/BottomNav';
 import { SplashScreen } from './components/SplashScreen';
 import { SidebarDrawer } from './components/SidebarDrawer';
-import { SupportPage } from './components/SupportPage';
 import { AboutPage } from './components/AboutPage';
 import { BannerManagementModal } from './components/BannerManagementModal';
+import { FloatingSupportWidget } from './components/FloatingSupportWidget';
 
 export default function App() {
   // Splash Screen initial state
@@ -30,39 +31,27 @@ export default function App() {
   const [banners, setBanners] = useState<StoreBanner[]>(() => getSavedBanners());
   const [isBannerModalOpen, setIsBannerModalOpen] = useState<boolean>(false);
 
-  // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track' | 'support' | 'about' | 'checkout'
-  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track' | 'support' | 'about' | 'checkout'>('products');
+  // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track' | 'about' | 'checkout'
+  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track' | 'about' | 'checkout'>('products');
   const [trackingOrderId, setTrackingOrderId] = useState<string>('');
 
-  // Theme state (Dark / Light Mode)
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    try {
-      const saved = localStorage.getItem('nexen_theme');
-      if (saved === 'dark' || saved === 'light') return saved;
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    } catch {
-      return 'light';
-    }
-  });
+  // Theme state (Dark / Light Mode) initialized from storage or system preference
+  const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
 
-  // Apply theme class to <html> / root element
+  // Instant Theme Toggle with zero-lag transition suppression
+  const handleToggleTheme = useCallback((newTheme: ThemeMode) => {
+    // 1. Immediately apply class to <html> and save to localStorage (0ms blocking)
+    applyTheme(newTheme, true);
+    // 2. Schedule React state update to avoid interrupting frame rate
+    startTransition(() => {
+      setTheme(newTheme);
+    });
+  }, []);
+
+  // Ensure theme is applied on initial mount
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-    try {
-      localStorage.setItem('nexen_theme', theme);
-    } catch (e) {
-      console.warn('Could not save theme to localStorage:', e);
-    }
-  }, [theme]);
-
-  const handleToggleTheme = (newTheme: 'light' | 'dark') => {
-    setTheme(newTheme);
-  };
+    applyTheme(theme, false);
+  }, []);
 
   // Merchant & API state
   const [merchantInfo, setMerchantInfo] = useState<MerchantInfo | null>(null);
@@ -163,11 +152,11 @@ export default function App() {
   }, [currentUser?.id, refreshUserOrders]);
 
   // Handle saving and persisting store banners
-  const handleSaveBanners = (updatedBanners: StoreBanner[]) => {
+  const handleSaveBanners = useCallback((updatedBanners: StoreBanner[]) => {
     setBanners(updatedBanners);
     saveBannersLocally(updatedBanners);
     saveStoreSetting('store_banners', updatedBanners);
-  };
+  }, []);
 
   // Load Merchant info
   const loadMerchantData = useCallback(async () => {
@@ -281,12 +270,45 @@ export default function App() {
     }
   }, [merchantInfo, loadMerchantData]);
 
-  // Handle navigate to tracking / orders
+  // Navigation callbacks
+  const handleNavigate = useCallback((tab: any) => {
+    setActiveTab(tab);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const handleNavigateHome = useCallback(() => {
+    setSelectedProductForOrder(null);
+    setSelectedOrderOptions(null);
+    setActiveTab('products');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const handleNavigateOrders = useCallback(() => {
+    setActiveTab('orders');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const handleNavigateSettings = useCallback(() => {
+    setActiveTab('settings');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const handleNavigateAdmin = useCallback(() => {
+    setActiveTab('admin');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
   const handleNavigateToTracking = useCallback((orderId: string) => {
     setTrackingOrderId(orderId);
     setActiveTab('orders');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
+
+  // Open / Close modal helpers
+  const handleOpenBannerManager = useCallback(() => setIsBannerModalOpen(true), []);
+  const handleCloseBannerManager = useCallback(() => setIsBannerModalOpen(false), []);
+  const handleOpenSidebar = useCallback(() => setIsSidebarOpen(true), []);
+  const handleCloseSidebar = useCallback(() => setIsSidebarOpen(false), []);
 
   // Logout handler
   const handleLogout = useCallback(() => {
@@ -304,7 +326,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F19] text-slate-900 dark:text-slate-100 flex flex-col selection:bg-[#7F00FF] selection:text-white transition-colors duration-200">
+    <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F19] text-slate-900 dark:text-slate-100 flex flex-col selection:bg-[#7F00FF] selection:text-white">
       {/* 0. Initial Welcome Splash Screen */}
       {isSplashScreenVisible && (
         <SplashScreen
@@ -321,20 +343,11 @@ export default function App() {
         onRefreshMerchant={loadMerchantData}
         currentUser={currentUser}
         onOpenAuth={handleOpenAuth}
-        onOpenUserOrders={() => {
-          setActiveTab('orders');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        onOpenSettings={() => {
-          setActiveTab('settings');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        onOpenSidebar={() => setIsSidebarOpen(true)}
+        onOpenUserOrders={handleNavigateOrders}
+        onOpenSettings={handleNavigateSettings}
+        onOpenSidebar={handleOpenSidebar}
         activeTab={activeTab}
-        setActiveTab={(tab) => {
-          setActiveTab(tab as any);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
+        setActiveTab={handleNavigate}
         ordersCount={orders.length}
         theme={theme}
         onToggleTheme={handleToggleTheme}
@@ -343,16 +356,13 @@ export default function App() {
       {/* Sidebar / Drawer Navigation Overlay */}
       <SidebarDrawer
         isOpen={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
+        onClose={handleCloseSidebar}
         currentUser={currentUser}
         merchantInfo={merchantInfo}
         isLoadingMerchant={isLoadingMerchant}
         onRefreshMerchant={loadMerchantData}
         activeTab={activeTab}
-        onNavigate={(tab) => {
-          setActiveTab(tab as any);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
+        onNavigate={handleNavigate}
         onOpenAuth={handleOpenAuth}
         onLogout={handleLogout}
         theme={theme}
@@ -370,37 +380,20 @@ export default function App() {
             onRefresh={loadProductsData}
             onSelectProduct={handleSelectProduct}
             banners={banners}
-            onOpenBannerManager={() => setIsBannerModalOpen(true)}
+            onOpenBannerManager={handleOpenBannerManager}
           />
         ) : activeTab === 'orders' || activeTab === 'track' ? (
           <OrdersHistoryPage
             currentUser={currentUser}
             orders={orders}
             onRefreshOrders={refreshUserOrders}
-            onNavigateHome={() => {
-              setActiveTab('products');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onNavigateHome={handleNavigateHome}
             onOpenAuth={handleOpenAuth}
             initialQuery={trackingOrderId}
           />
-        ) : activeTab === 'support' ? (
-          <SupportPage
-            onNavigateHome={() => {
-              setActiveTab('products');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-          />
         ) : activeTab === 'about' ? (
           <AboutPage
-            onNavigateHome={() => {
-              setActiveTab('products');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onNavigateSupport={() => {
-              setActiveTab('support');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onNavigateHome={handleNavigateHome}
           />
         ) : activeTab === 'settings' ? (
           <SettingsPage
@@ -411,20 +404,11 @@ export default function App() {
             onOpenAuth={handleOpenAuth}
             onLogout={handleLogout}
             onDeleteAccount={handleDeleteAccount}
-            onNavigateHome={() => {
-              setActiveTab('products');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onNavigateOrders={() => {
-              setActiveTab('orders');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onNavigateHome={handleNavigateHome}
+            onNavigateOrders={handleNavigateOrders}
             onRefreshMerchant={loadMerchantData}
             isLoadingMerchant={isLoadingMerchant}
-            onOpenAdmin={() => {
-              setActiveTab('admin');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onOpenAdmin={handleNavigateAdmin}
           />
         ) : activeTab === 'admin' ? (
           <AdminDashboard
@@ -432,24 +416,14 @@ export default function App() {
             merchantInfo={merchantInfo}
             onRefreshMerchant={loadMerchantData}
             isLoadingMerchant={isLoadingMerchant}
-            onOpenBannerManager={() => setIsBannerModalOpen(true)}
-            onNavigateHome={() => {
-              setActiveTab('products');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onNavigateSettings={() => {
-              setActiveTab('settings');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onOpenBannerManager={handleOpenBannerManager}
+            onNavigateHome={handleNavigateHome}
+            onNavigateSettings={handleNavigateSettings}
           />
         ) : activeTab === 'auth' ? (
           <AuthPage
             onLoginSuccess={handleLoginSuccess}
-            onBackToStore={() => {
-              setPendingProductForAuth(null);
-              setActiveTab('products');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onBackToStore={handleNavigateHome}
             pendingProduct={pendingProductForAuth}
             initialMode={authMode}
             theme={theme}
@@ -459,18 +433,10 @@ export default function App() {
             product={selectedProductForOrder}
             currentUser={currentUser}
             orderOptions={selectedOrderOptions}
-            onBack={() => {
-              setActiveTab('products');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onBack={handleNavigateHome}
             onOrderSuccess={handleOrderSuccess}
             onNavigateToTracking={handleNavigateToTracking}
-            onNavigateHome={() => {
-              setSelectedProductForOrder(null);
-              setSelectedOrderOptions(null);
-              setActiveTab('products');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onNavigateHome={handleNavigateHome}
           />
         ) : null}
       </main>
@@ -479,24 +445,12 @@ export default function App() {
       <BottomNav
         activeTab={activeTab}
         authMode={authMode}
-        onNavigateHome={() => {
-          setActiveTab('products');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        onNavigateOrders={() => {
-          setActiveTab('orders');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
+        onNavigateHome={handleNavigateHome}
+        onNavigateOrders={handleNavigateOrders}
         onNavigateLogin={() => handleOpenAuth('login')}
         onNavigateRegister={() => handleOpenAuth('register')}
-        onNavigateTrack={() => {
-          setActiveTab('orders');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        onOpenSettings={() => {
-          setActiveTab('settings');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
+        onNavigateTrack={handleNavigateOrders}
+        onOpenSettings={handleNavigateSettings}
         ordersCount={orders.length}
         isLoggedIn={!!currentUser}
       />
@@ -504,10 +458,14 @@ export default function App() {
       {/* Banner Upload & Management Modal */}
       <BannerManagementModal
         isOpen={isBannerModalOpen}
-        onClose={() => setIsBannerModalOpen(false)}
+        onClose={handleCloseBannerManager}
         banners={banners}
         onSaveBanners={handleSaveBanners}
       />
+
+      {/* Floating 3-Dots Support & Social Media Action Widget */}
+      {!isSplashScreenVisible && <FloatingSupportWidget />}
     </div>
   );
 }
+

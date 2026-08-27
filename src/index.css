@@ -2,6 +2,32 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* CSS Custom Properties for High-Performance Theme Variable Interpolation */
+:root {
+  --app-bg: #F8FAFC;
+  --app-text: #0F172A;
+  --app-card-bg: #FFFFFF;
+  --app-border: #E2E8F0;
+  --app-accent: #7F00FF;
+}
+
+html.dark {
+  --app-bg: #0B0F19;
+  --app-text: #F1F5F9;
+  --app-card-bg: #121624;
+  --app-border: rgba(255, 255, 255, 0.08);
+  --app-accent: #9d4edd;
+}
+
+/* Zero-Lag Instant Theme Switching Transition Suppressor */
+html.no-transitions,
+html.no-transitions *,
+html.no-transitions *::before,
+html.no-transitions *::after {
+  transition: none !important;
+  animation-duration: 0s !important;
+}
+
 @layer base {
   * {
     box-sizing: border-box;
@@ -9,6 +35,8 @@
 
   html {
     color-scheme: light dark;
+    background-color: var(--app-bg);
+    color: var(--app-text);
   }
 
   html.dark {
@@ -17,17 +45,11 @@
 
   body {
     font-family: 'Cairo', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-    color: #0F172A;
-    background-color: #F8FAFC;
-    transition: background-color 0.25s ease, color 0.25s ease;
+    color: var(--app-text);
+    background-color: var(--app-bg);
     overflow-x: hidden;
     width: 100%;
     max-width: 100vw;
-  }
-
-  html.dark body {
-    color: #F1F5F9;
-    background-color: #0B0F19;
   }
 }
 
@@ -129,4 +151,29 @@ button, a {
   body {
     -webkit-tap-highlight-color: transparent;
   }
+}
+
+/* Modal Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleUp {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scaleUp {
+  animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

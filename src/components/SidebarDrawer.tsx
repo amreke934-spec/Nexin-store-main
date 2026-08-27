@@ -4,7 +4,6 @@ import {
   LogIn, 
   Moon, 
   Sun, 
-  Headphones, 
   Info, 
   Package, 
   LayoutGrid, 
@@ -14,8 +13,6 @@ import {
   ShieldAlert, 
   ChevronLeft, 
   Sparkles,
-  Phone,
-  Send,
   User,
   RefreshCw
 } from 'lucide-react';
@@ -32,7 +29,7 @@ interface SidebarDrawerProps {
   isLoadingMerchant?: boolean;
   onRefreshMerchant?: () => void;
   activeTab: string;
-  onNavigate: (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'support' | 'about') => void;
+  onNavigate: (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about') => void;
   onOpenAuth: (mode?: 'login' | 'register') => void;
   onLogout: () => void;
   theme: 'light' | 'dark';
@@ -75,7 +72,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
     : (merchantInfo?.balance ?? 0);
   const activeCurrency = currentUser?.currency || merchantInfo?.currency || 'USD';
 
-  const handleNavClick = (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'support' | 'about') => {
+  const handleNavClick = (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about') => {
     onNavigate(tab);
     onClose();
   };
@@ -256,30 +253,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
                 </div>
               </button>
 
-              {/* 3. Support Page Link (تواصل مع الدعم الفني) */}
-              <button
-                type="button"
-                id="sidebar-support-btn"
-                onClick={() => handleNavClick('support')}
-                className={`w-full flex items-center justify-between p-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  activeTab === 'support'
-                    ? 'bg-[#7F00FF] text-white shadow-xs'
-                    : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-700 dark:text-slate-200'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Headphones className="w-4 h-4 text-emerald-500" />
-                  <span>تواصل مع الدعم الفني</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 font-medium">
-                    24/7
-                  </span>
-                  <ChevronLeft className="w-4 h-4 opacity-70" />
-                </div>
-              </button>
-
-              {/* 4. About App Page Link (لمحة عن التطبيق) */}
+              {/* 3. About App Page Link (لمحة عن التطبيق) */}
               <button
                 type="button"
                 id="sidebar-about-btn"

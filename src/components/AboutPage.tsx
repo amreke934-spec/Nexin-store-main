@@ -17,10 +17,9 @@ import { NexenLogo } from './NexenLogo';
 
 interface AboutPageProps {
   onNavigateHome: () => void;
-  onNavigateSupport: () => void;
 }
 
-export const AboutPage: React.FC<AboutPageProps> = ({ onNavigateHome, onNavigateSupport }) => {
+export const AboutPage: React.FC<AboutPageProps> = React.memo(({ onNavigateHome }) => {
   return (
     <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8 animate-fadeIn">
       {/* Hero Header */}
@@ -173,14 +172,28 @@ export const AboutPage: React.FC<AboutPageProps> = ({ onNavigateHome, onNavigate
           <p className="text-xs text-purple-200 mt-0.5">فريق الدعم الفني جاهز لمساعدتك في أي وقت عبر واتساب وتليجرام.</p>
         </div>
 
-        <button
-          type="button"
-          onClick={onNavigateSupport}
-          className="py-2.5 px-5 rounded-xl bg-[#7F00FF] hover:bg-[#6b00d6] active:scale-95 text-white text-xs sm:text-sm font-bold transition-all shadow-md shadow-[#7F00FF]/30 cursor-pointer shrink-0"
-        >
-          تواصل مع الدعم الفني
-        </button>
+        <div className="flex items-center gap-2.5 shrink-0">
+          <a
+            href="https://wa.me/963933829164"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs sm:text-sm font-bold transition-all shadow-md shadow-emerald-600/30 shrink-0"
+          >
+            واتساب مباشر
+          </a>
+          <a
+            href="https://t.me/nexen_store"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="py-2.5 px-4 rounded-xl bg-[#7F00FF] hover:bg-[#6b00d6] active:scale-95 text-white text-xs sm:text-sm font-bold transition-all shadow-md shadow-[#7F00FF]/30 shrink-0"
+          >
+            قناة التليجرام
+          </a>
+        </div>
       </div>
     </div>
   );
-};
+});
+
+AboutPage.displayName = 'AboutPage';
+

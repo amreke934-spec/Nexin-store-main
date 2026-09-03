@@ -39,6 +39,7 @@ import {
   createAdminUser,
   checkAdminOrderDetails,
   saveStoreSetting,
+  syncProcessingOrdersInDb,
   AdminStatsData,
   AdminUserData,
   AdminOrderCheckResult,
@@ -50,6 +51,7 @@ import {
   calculateRetailPrice,
 } from '../utils/profitUtils';
 import { formatPriceSyp, getExchangeRate, convertToSyp, formatSypNumber } from '../utils/currencyUtils';
+import { getScApiKeyStatus, updateScApiKey } from '../services/scStoreApi';
 
 interface AdminDashboardProps {
   currentUser: CustomerUser | null;
@@ -119,6 +121,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
   const [orderCheckResult, setOrderCheckResult] = useState<AdminOrderCheckResult | null>(null);
   const [orderCheckError, setOrderCheckError] = useState<string | null>(null);
 
+  // Bulk Processing Orders Sync State
+  const [isSyncingProcessingOrders, setIsSyncingProcessingOrders] = useState<boolean>(false);
+  const [syncProcessingMessage, setSyncProcessingMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  // SC Store API Key Management State
+  const [apiKeyStatus, setApiKeyStatus] = useState<{
+    hasCustomKey: boolean;
+    isDefault: boolean;
+    maskedKey: string;
+    keyLength: number;
+    prefix: string;
+  } | null>(null);
+  const [inputApiKey, setInputApiKey] = useState<string>('');
+  const [isUpdatingApiKey, setIsUpdatingApiKey] = useState<boolean>(false);
+  const [apiKeyFeedback, setApiKeyFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [showApiKeyInput, setShowApiKeyInput] = useState<boolean>(false);
+
   // UI state
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
@@ -127,6 +146,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
     navigator.clipboard.writeText(text);
     setCopiedText(label);
     setTimeout(() => setCopiedText(null), 2000);
+  };
+
+  // Load API Key Status
+  const loadApiKeyStatus = useCallback(async () => {
+    try {
+      const st = await getScApiKeyStatus();
+      setApiKeyStatus(st);
+    } catch {}
+  }, []);
+
+  // Save / Update SC Store API Key with Live Verification
+  const handleSaveApiKey = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanKey = inputApiKey.trim();
+    if (!cleanKey) {
+      setApiKeyFeedback({ type: 'error', text: 'يرجى إدخال مفتاح API أولاً قبل الحفظ.' });
+      return;
+    }
+
+    setIsUpdatingApiKey(true);
+    setApiKeyFeedback(null);
+
+    try {
+      const res = await updateScApiKey(cleanKey);
+      if (res.success) {
+        setApiKeyFeedback({
+          type: 'success',
+          text: res.message || 'تم التحقق من مفتاح API بنجاح وحفظه في النظام!',
+        });
+        setInputApiKey('');
+        setShowApiKeyInput(false);
+        await loadApiKeyStatus();
+        onRefreshMerchant();
+      } else {
+        setApiKeyFeedback({
+          type: 'error',
+          text: `${res.message || 'فشل التحقق من المفتاح'} ${res.detail ? `(${res.detail})` : ''}`,
+        });
+      }
+    } catch (err: any) {
+      setApiKeyFeedback({ type: 'error', text: err.message || 'حدث خطأ أثناء حفظ المفتاح' });
+    } finally {
+      setIsUpdatingApiKey(false);
+    }
   };
 
   // Load Admin Stats
@@ -161,7 +224,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
   useEffect(() => {
     loadStats();
     loadUsers();
-  }, [loadStats, loadUsers]);
+    loadApiKeyStatus();
+  }, [loadStats, loadUsers, loadApiKeyStatus]);
 
   // Open Edit User Modal
   const handleOpenEditUser = (user: AdminUserData) => {
@@ -309,6 +373,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
       setOrderCheckError(err.message || 'حدث خطأ أثناء فحص الطلب');
     } finally {
       setIsCheckingOrder(false);
+    }
+  };
+
+  // Sync / check all processing/pending orders from SC Store API
+  const handleSyncProcessingOrdersOnly = async () => {
+    setIsSyncingProcessingOrders(true);
+    setSyncProcessingMessage(null);
+    try {
+      const res = await syncProcessingOrdersInDb();
+      if (res.success) {
+        setSyncProcessingMessage({
+          type: 'success',
+          text: `تم فحص ${res.totalChecked} طلب قيد المعالجة: ${res.completedCount || 0} مكتمل، ${res.stillProcessingCount || 0} ما زال قيد المعالجة.`,
+        });
+        await loadStats();
+      } else {
+        setSyncProcessingMessage({
+          type: 'error',
+          text: res.message || res.error || 'فشل التحقق من الطلبات قيد المعالجة',
+        });
+      }
+    } catch (err: any) {
+      setSyncProcessingMessage({
+        type: 'error',
+        text: err.message || 'حدث خطأ أثناء فحص الطلبات',
+      });
+    } finally {
+      setIsSyncingProcessingOrders(false);
+      setTimeout(() => setSyncProcessingMessage(null), 6000);
     }
   };
 
@@ -555,7 +648,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
 
           {/* Recent Orders Table */}
           <div className="bg-white dark:bg-[#151221] border border-gray-200/80 dark:border-white/10 rounded-3xl p-6 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
                   أحدث الطلبات المنفذة في المتجر
@@ -565,15 +658,64 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setActiveAdminTab('order_check')}
-                className="text-xs font-bold text-[#7F00FF] dark:text-purple-400 hover:underline flex items-center gap-1 cursor-pointer"
-              >
-                <span>فحص طلب محدد</span>
-                <Search className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Check processing orders only button */}
+                <button
+                  type="button"
+                  id="admin-sync-processing-orders-btn"
+                  onClick={handleSyncProcessingOrdersOnly}
+                  disabled={isSyncingProcessingOrders}
+                  className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                  title="التحقق من تحديثات الطلبات التي قيد المعالجة فقط عبر SC Store API"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingProcessingOrders ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isSyncingProcessingOrders ? 'جارٍ التحقق من الـ API...' : 'التحقق من الطلبات قيد المعالجة'}
+                  </span>
+                  {(stats?.pendingOrders ?? 0) > 0 && (
+                    <span className="px-1.5 py-0.2 bg-blue-600 text-white rounded-full text-[10px] font-mono font-black animate-pulse">
+                      {stats?.pendingOrders}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveAdminTab('order_check')}
+                  className="text-xs font-bold text-[#7F00FF] dark:text-purple-400 hover:underline flex items-center gap-1 cursor-pointer px-2 py-1"
+                >
+                  <span>فحص طلب محدد</span>
+                  <Search className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
+
+            {/* Sync Feedback Alert */}
+            {syncProcessingMessage && (
+              <div
+                className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-between gap-3 animate-in fade-in duration-150 ${
+                  syncProcessingMessage.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800/60'
+                    : 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-200 border-red-200 dark:border-red-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {syncProcessingMessage.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                  )}
+                  <span>{syncProcessingMessage.text}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSyncProcessingMessage(null)}
+                  className="text-slate-400 hover:text-slate-600 text-xs p-1"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             {stats?.recentOrders && stats.recentOrders.length > 0 ? (
               <div className="overflow-x-auto">
@@ -850,22 +992,136 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
               </div>
             </div>
 
-            {/* API Key Security Note */}
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-white flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-purple-900/60 text-purple-300 flex items-center justify-center">
-                  <Key className="w-4 h-4" />
+            {/* SC Store API Key Manager Card */}
+            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 text-white space-y-5">
+              <div className="flex items-start justify-between flex-wrap gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-11 h-11 rounded-2xl bg-purple-900/70 border border-purple-500/30 text-purple-300 flex items-center justify-center shrink-0">
+                    <Key className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-sm font-bold text-white">إدارة وتحديث مفتاح الربط البرمجي (X-Api-Key)</h4>
+                      {apiKeyStatus?.hasCustomKey ? (
+                        <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          مفتاح مخصص ونشط بقاعدة البيانات
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full">
+                          المفتاح الافتراضي للمتجر
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      يتم تخزين المفتاح بشكل آمن على الخادم وقاعدة البيانات، مع التحقق المباشر من صلاحيته لدى SC Store
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-xs font-bold text-white">مفتاح API الخاص بالمتجر (SC_STORE_API_KEY)</h4>
-                  <p className="text-[11px] text-slate-400">
-                    يتم الحفاظ على المفتاح بأمان تام على الخادم الخلفي (Server-Side) لحماية الرصيد
-                  </p>
+
+                <div className="flex items-center gap-2">
+                  <div className="px-3.5 py-1.5 bg-slate-800/90 rounded-xl text-xs font-mono text-purple-300 border border-slate-700/80 flex items-center gap-2">
+                    <span>{apiKeyStatus?.maskedKey || 'sc_xIfr••••••••••••••••••••••••Kag2'}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(apiKeyStatus?.maskedKey || '', 'مفتاح API')}
+                      className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                      title="نسخ"
+                    >
+                      {copiedText === 'مفتاح API' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowApiKeyInput(!showApiKeyInput);
+                      setApiKeyFeedback(null);
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Edit className="w-3.5 h-3.5" />
+                    <span>{showApiKeyInput ? 'إلغاء' : 'تغيير المفتاح'}</span>
+                  </button>
                 </div>
               </div>
-              <span className="px-3 py-1 bg-slate-800 rounded-lg text-xs font-mono text-purple-300 border border-slate-700">
-                sc_xIfr••••••••••••••••••••••••Kag2
-              </span>
+
+              {/* Feedback Message */}
+              {apiKeyFeedback && (
+                <div
+                  className={`p-3.5 rounded-2xl text-xs font-medium flex items-center gap-2.5 animate-in fade-in ${
+                    apiKeyFeedback.type === 'success'
+                      ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                      : 'bg-red-500/15 border border-red-500/30 text-red-300'
+                  }`}
+                >
+                  {apiKeyFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                  )}
+                  <span>{apiKeyFeedback.text}</span>
+                </div>
+              )}
+
+              {/* Expandable Key Input Form */}
+              {showApiKeyInput && (
+                <form onSubmit={handleSaveApiKey} className="pt-2 border-t border-slate-800 space-y-4 animate-in fade-in">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-200">
+                      أدخل مفتاح API الجديد (يبدأ بـ <span className="font-mono text-purple-300">sc_</span>)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={inputApiKey}
+                        onChange={(e) => setInputApiKey(e.target.value)}
+                        placeholder="مثال: sc_6uT••••••••••••••••••••042x"
+                        dir="ltr"
+                        className="w-full px-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs sm:text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-[#7F00FF] focus:ring-2 focus:ring-[#7F00FF]/30 transition-all text-left"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      انسخ المفتاح بالكامل من حسابك في موقع SC Store (توثيق واجهة الربط البرمجي). سيتم إجراء فحص فوري ومصادقة مع الخادم المزود لتأكيد صحة المفتاح قبل حفظه في قاعدة البيانات.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="submit"
+                      disabled={isUpdatingApiKey || !inputApiKey.trim()}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#7F00FF] to-[#6b00d6] hover:from-[#6b00d6] hover:to-[#5500aa] text-white text-xs font-black transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {isUpdatingApiKey ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>جاري التحقق والمصادقة...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>التحقق والحفظ المباشر</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKeyInput(false)}
+                      className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Status Note on 403 Graceful Handling */}
+              <div className="p-3 bg-purple-950/40 border border-purple-900/60 rounded-2xl flex items-center gap-2.5 text-[11px] text-purple-200">
+                <AlertCircle className="w-4 h-4 text-purple-400 shrink-0" />
+                <span>
+                  نظام حماية الاستمرارية: في حال تأخر أو حظر المفتاح (كود 403)، يقوم المتجر تلقائياً بعرض قائمة المنتجات مع صورها (image_url) لضمان عدم توقف عمليات الشراء والتصفح.
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -1037,6 +1293,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                 استعلام مباشر يجمع بين سجل قاعدة بيانات Neon واستجابة خادم SC Store في الوقت الفعلي.
               </p>
             </div>
+          </div>
+
+          {/* Bulk Check Banner for Processing Orders */}
+          <div className="p-4 rounded-2xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <Clock className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
+              <div>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                  التحقق التلقائي من الطلبات قيد المعالجة فقط
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                  يقوم بالاستعلام عن حالة جميع الطلبات التي ما زالت في حالة قيد التنفيذ أو معالجة وتحديثها في قاعدة البيانات.
+                </span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              id="admin-bulk-check-processing-btn"
+              onClick={handleSyncProcessingOrdersOnly}
+              disabled={isSyncingProcessingOrders}
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingProcessingOrders ? 'animate-spin' : ''}`} />
+              <span>{isSyncingProcessingOrders ? 'جارٍ فحص المعالقة...' : 'فحص الطلبات المعلقة الآن'}</span>
+            </button>
           </div>
 
           <form onSubmit={handleCheckOrder} className="flex flex-col sm:flex-row gap-3 pt-2">

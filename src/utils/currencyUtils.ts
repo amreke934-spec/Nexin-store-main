@@ -66,11 +66,18 @@ export function convertToSyp(
 }
 
 /**
- * Formats a number with thousands separators for Syrian Pounds (e.g. "150,000").
+ * Formats a number with thousands separators for Syrian Pounds / store currency (e.g. "127.84" or "150,000").
  */
 export function formatSypNumber(amount: number): string {
   if (typeof amount !== 'number' || isNaN(amount)) return '0';
-  return Math.round(amount).toLocaleString('en-US');
+  if (Number.isInteger(amount)) {
+    return amount.toLocaleString('en-US');
+  }
+  // For numbers with decimals, preserve exact decimals from supplier
+  if (amount < 10) {
+    return Number(amount.toFixed(4)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
+  return Number(amount.toFixed(2)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /**

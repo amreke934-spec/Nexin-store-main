@@ -120,15 +120,28 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
         cleanedFields['Player_ID'] = mainVal;
       }
 
-      const payload = {
-        productId: product.productId,
-        qty: qty,
-        dynamicFields: cleanedFields,
-      };
+      let payload: any;
+      if (product.isCash || product.sectionKey === 'cashbalances' || (product as any).cashType) {
+        payload = {
+          cashType: (product as any).cashType || 'syriatel-cash',
+          amount: Number(cleanedFields['amount'] || qty || product.price),
+          wallet: cleanedFields['wallet'] || cleanedFields['phone_number'] || cleanedFields['Player_ID'] || '',
+          dynamicFields: cleanedFields,
+        };
+      } else {
+        payload = {
+          productId: product.productId,
+          qty: qty,
+          dynamicFields: cleanedFields,
+        };
+      }
 
       const result = await createNewOrder(payload);
 
       if (result.success && result.orderId) {
+        const rawStatus = (result.data?.order?.status || result.data?.status || 'processing').toLowerCase();
+        const initialStatus = rawStatus.includes('complete') ? 'completed' : 'processing';
+
         const newOrder: OrderItem = {
           id: result.orderId,
           orderId: result.orderId,
@@ -138,9 +151,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
           qty: qty,
           price: product.price,
           total: product.price * qty,
-          currency: product.currency || 'USD',
+          currency: product.currency || 'SYP',
           dynamicFields: cleanedFields,
-          status: 'completed',
+          status: initialStatus,
           createdAt: new Date().toISOString(),
           customerName: currentUser?.name,
           customerEmail: currentUser?.email,
@@ -296,9 +309,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-12 h-12 rounded-2xl overflow-hidden bg-slate-900 border border-slate-200 dark:border-white/10 shrink-0 p-0.5 shadow-xs">
                 <img
-                  src={product.image || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=500&auto=format&fit=crop&q=60'}
+                  src={product.image || 'https://sc-store.top/logos/game-charge.png'}
                   alt={product.name}
+                  referrerPolicy="no-referrer"
                   className="w-full h-full object-cover rounded-xl"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = 'https://sc-store.top/logos/game-charge.png';
+                  }}
                 />
               </div>
               <div className="min-w-0">
@@ -338,16 +355,35 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                         {fieldLabel} {isRequired && <span className="text-red-500">*</span>}
                       </label>
                       <div className="relative">
-                        <input
-                          type={serviceType === 'cash' || serviceType === 'telecom' ? 'tel' : 'text'}
-                          id={`dynamic-field-${fieldName}`}
-                          required={isRequired}
-                          placeholder={fieldPlaceholder}
-                          value={dynamicFields[fieldName] || ''}
-                          dir="ltr"
-                          onChange={(e) => handleFieldChange(fieldName, e.target.value)}
-                          className="w-full pl-4 pr-11 py-3.5 bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-2xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:bg-white dark:focus:bg-[#1D192E] focus:outline-none focus:border-[#7F00FF] focus:ring-4 focus:ring-[#7F00FF]/15 font-mono transition-all text-right shadow-xs"
-                        />
+                        {field.options && Array.isArray(field.options) && field.options.length > 0 ? (
+                          <select
+                            id={`dynamic-field-${fieldName}`}
+                            required={isRequired}
+                            value={dynamicFields[fieldName] || ''}
+                            onChange={(e) => handleFieldChange(fieldName, e.target.value)}
+                            className="w-full pl-4 pr-11 py-3.5 bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-2xl text-xs sm:text-sm text-slate-900 dark:text-white focus:bg-white dark:focus:bg-[#1D192E] focus:outline-none focus:border-[#7F00FF] focus:ring-4 focus:ring-[#7F00FF]/15 font-medium transition-all text-right shadow-xs cursor-pointer"
+                          >
+                            <option value="" className="text-slate-400 dark:bg-[#1A1A1A]">
+                              -- اختر {fieldLabel} --
+                            </option>
+                            {field.options.map((opt: string) => (
+                              <option key={opt} value={opt} className="text-slate-900 dark:text-white dark:bg-[#1A1A1A]">
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type={serviceType === 'cash' || serviceType === 'telecom' ? 'tel' : 'text'}
+                            id={`dynamic-field-${fieldName}`}
+                            required={isRequired}
+                            placeholder={fieldPlaceholder}
+                            value={dynamicFields[fieldName] || ''}
+                            dir="ltr"
+                            onChange={(e) => handleFieldChange(fieldName, e.target.value)}
+                            className="w-full pl-4 pr-11 py-3.5 bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-2xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:bg-white dark:focus:bg-[#1D192E] focus:outline-none focus:border-[#7F00FF] focus:ring-4 focus:ring-[#7F00FF]/15 font-mono transition-all text-right shadow-xs"
+                          />
+                        )}
                         <div className="absolute right-4 top-4 pointer-events-none text-slate-400">
                           {renderFieldIcon()}
                         </div>

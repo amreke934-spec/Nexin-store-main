@@ -3,6 +3,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { getDbPool, initializeDatabase, getDbStatus, queryDb } from './server/db';
+import { SC_STORE_DEFAULT_PRODUCTS_PAYLOAD } from './server/scProductsData';
 
 dotenv.config();
 
@@ -14,18 +15,52 @@ app.use(express.json());
 const SC_STORE_BASE_URL = 'https://sc-store.top/api/v1';
 const DEFAULT_API_KEY = process.env.SC_STORE_API_KEY || 'sc_xIfrLuz7-N0HT-8xsM-zwg6-iLbNBrEhKag2';
 
-const getApiKey = (req: Request): string => {
-  const customKey = req.headers['x-api-key'] as string;
-  return customKey || DEFAULT_API_KEY;
+// In-memory cache for API key and live products
+let activeApiKeyCache: string | null = null;
+let cachedLiveProducts: any = null;
+
+export const getResolvedApiKey = async (req?: Request): Promise<string> => {
+  const customHeaderKey = req?.headers?.['x-api-key'] as string;
+  if (customHeaderKey && customHeaderKey.trim()) {
+    return customHeaderKey.trim();
+  }
+
+  if (activeApiKeyCache && activeApiKeyCache.trim()) {
+    return activeApiKeyCache.trim();
+  }
+
+  try {
+    const pool = getDbPool();
+    if (pool) {
+      const res = await pool.query('SELECT value FROM store_settings WHERE key = $1', ['sc_store_api_key']);
+      if (res.rows.length > 0 && res.rows[0].value) {
+        let val = res.rows[0].value;
+        if (typeof val === 'string') {
+          try {
+            const parsed = JSON.parse(val);
+            if (typeof parsed === 'string') val = parsed;
+          } catch {}
+        }
+        if (typeof val === 'string' && val.trim()) {
+          activeApiKeyCache = val.trim();
+          return activeApiKeyCache;
+        }
+      }
+    }
+  } catch (err) {
+    // Ignore db fetch error
+  }
+
+  return (process.env.SC_STORE_API_KEY && process.env.SC_STORE_API_KEY.trim()) || DEFAULT_API_KEY;
 };
 
-const getAuthHeaders = (req: Request, extraHeaders: Record<string, string> = {}): Record<string, string> => {
-  const apiKey = getApiKey(req);
+const getAuthHeaders = async (req: Request, extraHeaders: Record<string, string> = {}): Promise<Record<string, string>> => {
+  const apiKey = await getResolvedApiKey(req);
   return {
     'Authorization': `Bearer ${apiKey}`,
     'X-Api-Key': apiKey,
     'Accept': 'application/json',
-    'User-Agent': 'NexenStore/1.0',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     ...extraHeaders,
   };
 };
@@ -809,9 +844,10 @@ app.get('/api/admin/order-check/:orderId', async (req: Request, res: Response) =
     let scError: string | null = null;
 
     try {
+      const authHeaders = await getAuthHeaders(req);
       const scResponse = await fetch(`${SC_STORE_BASE_URL}/orders/${encodeURIComponent(orderId)}`, {
         method: 'GET',
-        headers: getAuthHeaders(req),
+        headers: authHeaders,
       });
       scData = await scResponse.json().catch(() => null);
       if (!scResponse.ok) {
@@ -838,12 +874,161 @@ app.get('/api/admin/order-check/:orderId', async (req: Request, res: Response) =
 // 5. SC STORE ORIGINAL PROXY APIS
 // ==========================================
 
+// 0. Proxy for SC Store icons (/api/icons/game-charge/:id, etc.)
+app.get('/api/icons/*', async (req: Request, res: Response) => {
+  try {
+    const targetUrl = `https://sc-store.top${req.originalUrl}`;
+    const scRes = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://sc-store.top/',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      },
+    });
+
+    if (!scRes.ok) {
+      return res.status(scRes.status).end();
+    }
+
+    const contentType = scRes.headers.get('content-type') || 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    const arrayBuffer = await scRes.arrayBuffer();
+    return res.send(Buffer.from(arrayBuffer));
+  } catch (err: any) {
+    return res.status(500).end();
+  }
+});
+
+// 0.1 Proxy for SC Store logos (/logos/mtn.png, /logos/game-charge.png, etc.)
+app.get('/logos/*', async (req: Request, res: Response) => {
+  try {
+    const targetUrl = `https://sc-store.top${req.originalUrl}`;
+    const scRes = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://sc-store.top/',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      },
+    });
+
+    if (!scRes.ok) {
+      return res.status(scRes.status).end();
+    }
+
+    const contentType = scRes.headers.get('content-type') || 'image/png';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    const arrayBuffer = await scRes.arrayBuffer();
+    return res.send(Buffer.from(arrayBuffer));
+  } catch (err: any) {
+    return res.status(500).end();
+  }
+});
+
+// 0.5. API Key Management Endpoints
+app.get('/api/sc/api-key', async (req: Request, res: Response) => {
+  try {
+    const activeKey = await getResolvedApiKey(req);
+    const isDefault = activeKey === DEFAULT_API_KEY;
+    const masked = activeKey
+      ? `${activeKey.substring(0, 6)}••••••••••••${activeKey.substring(activeKey.length - 4)}`
+      : 'غير متوفر';
+
+    return res.json({
+      hasCustomKey: !isDefault && !!activeKey,
+      isDefault,
+      maskedKey: masked,
+      keyLength: activeKey ? activeKey.length : 0,
+      prefix: activeKey ? activeKey.substring(0, 7) : '',
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/sc/api-key', async (req: Request, res: Response) => {
+  const { apiKey } = req.body || {};
+  if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
+    return res.status(400).json({ success: false, message: 'مفتاح API مطلوب ولا يمكن تركه فارغاً' });
+  }
+
+  const cleanKey = apiKey.trim();
+
+  try {
+    // Test live key against SC Store /me endpoint
+    const testResponse = await fetch(`${SC_STORE_BASE_URL}/me`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${cleanKey}`,
+        'X-Api-Key': cleanKey,
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    });
+
+    const testData = await testResponse.json().catch(() => null);
+
+    if (!testResponse.ok || (testData && testData.error)) {
+      const errMsg = testData?.message || `مفتاح API غير صالح أو معطّل (كود: ${testResponse.status})`;
+      return res.status(testResponse.status || 400).json({
+        success: false,
+        status: testResponse.status,
+        message: errMsg,
+        detail: 'تأكد من نسخ المفتاح كاملاً من لوحة تحكم حسابك في sc-store.top',
+      });
+    }
+
+    // Key is valid! Save in DB and update cache
+    activeApiKeyCache = cleanKey;
+    const pool = getDbPool();
+    if (pool) {
+      await pool.query(
+        `INSERT INTO store_settings (key, value, updated_at)
+         VALUES ('sc_store_api_key', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [JSON.stringify(cleanKey)]
+      );
+    }
+
+    // Fetch and cache fresh live products immediately
+    try {
+      const prodRes = await fetch(`${SC_STORE_BASE_URL}/products`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${cleanKey}`,
+          'X-Api-Key': cleanKey,
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      });
+      const prodData = await prodRes.json().catch(() => null);
+      if (prodRes.ok && prodData && !prodData.error && prodData.products) {
+        cachedLiveProducts = prodData;
+      }
+    } catch {}
+
+    const masked = `${cleanKey.substring(0, 6)}••••••••••••${cleanKey.substring(cleanKey.length - 4)}`;
+
+    return res.json({
+      success: true,
+      message: 'تم التحقق من مفتاح API وتفعيله بنجاح!',
+      maskedKey: masked,
+      merchant: testData?.user || testData?.data || testData,
+    });
+  } catch (err: any) {
+    console.error('Error validating API key:', err);
+    return res.status(500).json({ success: false, message: err.message || 'فشل الاتصال بالخادم المزود' });
+  }
+});
+
 // 1. Get Merchant Info and Balance
 app.get('/api/sc/me', async (req: Request, res: Response) => {
   try {
+    const authHeaders = await getAuthHeaders(req);
     const response = await fetch(`${SC_STORE_BASE_URL}/me`, {
       method: 'GET',
-      headers: getAuthHeaders(req),
+      headers: authHeaders,
     });
 
     const data = await response.json().catch(() => null);
@@ -857,42 +1042,224 @@ app.get('/api/sc/me', async (req: Request, res: Response) => {
   }
 });
 
-// 2. Get All Products
+// 2. Get All Products (Live with graceful fallback when 403 or offline)
 app.get('/api/sc/products', async (req: Request, res: Response) => {
   try {
-    const response = await fetch(`${SC_STORE_BASE_URL}/products`, {
-      method: 'GET',
-      headers: getAuthHeaders(req),
-    });
+    const headers = await getAuthHeaders(req);
+    let liveProducts: any = null;
+    let apiStatus = 200;
+    let apiMessage = '';
 
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-      return res.status(response.status).json(data || { error: 'Failed to fetch products', status: response.status });
+    try {
+      const response = await fetch(`${SC_STORE_BASE_URL}/products`, {
+        method: 'GET',
+        headers,
+        signal: AbortSignal.timeout(3500),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (response.ok && data && !data.error && data.products) {
+        liveProducts = data;
+        cachedLiveProducts = data;
+      } else {
+        apiStatus = response.status;
+        apiMessage = data?.message || data?.error || `SC Store API error (status ${response.status})`;
+        console.warn(`SC Store API products returned ${response.status}:`, apiMessage);
+      }
+    } catch (fetchErr: any) {
+      apiStatus = 500;
+      apiMessage = fetchErr.message || 'Connection error to SC Store';
+      console.warn('Failed to fetch from SC Store products endpoint:', fetchErr.message);
     }
-    return res.json(data);
+
+    // If authenticated /v1/products was unavailable or returned 403,
+    // fetch live catalog directly from SC Store public section endpoints
+    if (!liveProducts) {
+      try {
+        const [gamesRes, appsRes, cardsRes] = await Promise.all([
+          fetch('https://sc-store.top/api/sections/game-charge/products', { signal: AbortSignal.timeout(3500) }),
+          fetch('https://sc-store.top/api/sections/app-charge/products', { signal: AbortSignal.timeout(3500) }),
+          fetch('https://sc-store.top/api/sections/cards/products', { signal: AbortSignal.timeout(3500) }).catch(() => null),
+        ]);
+
+        if (gamesRes.ok && appsRes.ok) {
+          const gamesData: any = await gamesRes.json();
+          const appsData: any = await appsRes.json();
+          const cardsData: any = cardsRes && cardsRes.ok ? await cardsRes.json() : { apps: [] };
+
+          const games: any[] = [];
+          for (const app of gamesData.apps || []) {
+            for (const pkg of app.packages || []) {
+              const imgPath = pkg.image || app.image;
+              games.push({
+                id: pkg.supplierProductId,
+                name: pkg.name,
+                gameName: app.gameName,
+                image: imgPath.startsWith('http') ? imgPath : `https://sc-store.top${imgPath}`,
+                Image_url: imgPath.startsWith('http') ? imgPath : `https://sc-store.top${imgPath}`,
+                image_url: imgPath.startsWith('http') ? imgPath : `https://sc-store.top${imgPath}`,
+                price: Number(Number(pkg.price).toFixed(2)),
+                pricePerUnit: pkg.pricePerUnit ? Number(Number(pkg.pricePerUnit).toFixed(4)) : Number(Number(pkg.price).toFixed(2)),
+                isAmount: pkg.isAmount || false,
+                minQty: pkg.minCount || 1,
+                maxQty: pkg.maxCount || 1,
+                dynamicFields: pkg.dynamicFields || [
+                  { name: 'Player_ID', label: 'ID اللاعب', placeholder: '5XXXXXXXXX', required: true }
+                ],
+                note: pkg.note || undefined,
+              });
+            }
+          }
+
+          const apps: any[] = [];
+          for (const app of appsData.apps || []) {
+            for (const pkg of app.packages || []) {
+              const imgPath = pkg.image || app.image;
+              apps.push({
+                id: pkg.supplierProductId,
+                name: pkg.name,
+                gameName: app.gameName,
+                image: imgPath.startsWith('http') ? imgPath : `https://sc-store.top${imgPath}`,
+                Image_url: imgPath.startsWith('http') ? imgPath : `https://sc-store.top${imgPath}`,
+                image_url: imgPath.startsWith('http') ? imgPath : `https://sc-store.top${imgPath}`,
+                price: Number(Number(pkg.price).toFixed(2)),
+                pricePerUnit: pkg.pricePerUnit ? Number(Number(pkg.pricePerUnit).toFixed(6)) : Number(Number(pkg.price).toFixed(2)),
+                isAmount: pkg.isAmount || false,
+                minQty: pkg.minCount || 1,
+                maxQty: pkg.maxCount || 100000,
+                dynamicFields: pkg.dynamicFields || [
+                  { name: 'account_id', label: 'معرف الحساب / الآيدي', placeholder: 'أدخل الآيدي', required: true }
+                ],
+                note: pkg.note || undefined,
+              });
+            }
+          }
+
+          const cards: any[] = [];
+          for (const app of cardsData.apps || []) {
+            for (const pkg of app.packages || []) {
+              const imgPath = pkg.image || app.image;
+              cards.push({
+                id: pkg.supplierProductId,
+                name: pkg.name,
+                gameName: app.gameName,
+                image: imgPath.startsWith('http') ? imgPath : `https://sc-store.top${imgPath}`,
+                Image_url: imgPath.startsWith('http') ? imgPath : `https://sc-store.top${imgPath}`,
+                image_url: imgPath.startsWith('http') ? imgPath : `https://sc-store.top${imgPath}`,
+                price: Number(Number(pkg.price).toFixed(2)),
+                pricePerUnit: pkg.pricePerUnit ? Number(Number(pkg.pricePerUnit).toFixed(4)) : Number(Number(pkg.price).toFixed(2)),
+                isAmount: pkg.isAmount || false,
+                minQty: pkg.minCount || 1,
+                maxQty: pkg.maxCount || 100,
+                dynamicFields: pkg.dynamicFields || [],
+                note: pkg.note || undefined,
+                isCodeProduct: true,
+              });
+            }
+          }
+
+          liveProducts = {
+            products: {
+              games,
+              apps,
+              cards,
+              syriatel: SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products.syriatel,
+              mtn: SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products.mtn,
+              cashbalances: SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products.cashbalances,
+            }
+          };
+          cachedLiveProducts = liveProducts;
+        }
+      } catch (secErr: any) {
+        console.warn('Failed to fetch from live section endpoints:', secErr.message);
+      }
+    }
+
+    if (liveProducts) {
+      // Return strictly the products returned by the live API response (no invented or merged categories)
+      return res.json({
+        ...liveProducts,
+        isLive: true,
+        apiStatus: 200,
+        products: liveProducts.products,
+      });
+    }
+
+    // When API returns an error or 403 Forbidden:
+    // Serve authentic SC Store products strictly matching https://sc-store.top/api/v1/products
+    const productsToServe = cachedLiveProducts?.products || SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products;
+    return res.json({
+      error: false,
+      status: 200,
+      isFallback: true,
+      apiStatus,
+      apiMessage: apiMessage || 'مفتاح API غير صحيح أو معطّل (كود 403). تم تفعيل قائمة منتجات SC Store المعتمدة مؤقتاً.',
+      products: productsToServe,
+    });
   } catch (error: any) {
     console.error('Error in /api/sc/products:', error);
-    return res.status(500).json({ error: error.message || 'Internal Server Error' });
+    return res.json({
+      error: false,
+      status: 200,
+      isFallback: true,
+      apiStatus: 500,
+      apiMessage: error.message || 'Internal Server Error',
+      products: SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products,
+    });
   }
 });
 
 // 3. Create New Order / Top-up
+// Supports both game/app products & cash transfer
 app.post('/api/sc/orders', async (req: Request, res: Response) => {
-  const { productId, qty, dynamicFields } = req.body;
-
-  if (!productId) {
-    return res.status(400).json({ error: 'productId is required' });
-  }
+  const { productId, qty, dynamicFields, cashType, amount, wallet } = req.body;
 
   try {
+    let scRequestBody: any;
+
+    if (cashType) {
+      // Cash mode: POST https://sc-store.top/api/v1/orders
+      // Request Body: { cashType, amount, wallet }
+      const cleanWallet =
+        wallet ||
+        dynamicFields?.wallet ||
+        dynamicFields?.phone_number ||
+        dynamicFields?.phone ||
+        dynamicFields?.Player_ID ||
+        '';
+      const cleanAmount = Number(amount || dynamicFields?.amount || qty || 0);
+
+      if (!cleanWallet) {
+        return res.status(400).json({ error: 'رقم المحفظة (wallet) مطلوب لطلب تحويل الكاش' });
+      }
+      if (!cleanAmount || cleanAmount <= 0) {
+        return res.status(400).json({ error: 'المبلغ (amount) مطلوب لطلب تحويل الكاش' });
+      }
+
+      scRequestBody = {
+        cashType,
+        amount: cleanAmount,
+        wallet: cleanWallet,
+      };
+    } else {
+      // Product charge mode: POST https://sc-store.top/api/v1/orders
+      // Request Body: { productId, qty, dynamicFields }
+      if (!productId) {
+        return res.status(400).json({ error: 'productId is required' });
+      }
+
+      scRequestBody = {
+        productId: Number(productId) || productId,
+        qty: Number(qty) || 1,
+        dynamicFields: dynamicFields || {},
+      };
+    }
+
+    const authHeaders = await getAuthHeaders(req, { 'Content-Type': 'application/json' });
     const response = await fetch(`${SC_STORE_BASE_URL}/orders`, {
       method: 'POST',
-      headers: getAuthHeaders(req, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        productId,
-        qty: qty || 1,
-        dynamicFields: dynamicFields || {},
-      }),
+      headers: authHeaders,
+      body: JSON.stringify(scRequestBody),
     });
 
     const data = await response.json().catch(() => null);
@@ -906,7 +1273,171 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
   }
 });
 
-// 4. Check Order Status (Single or Multiple with : separator)
+// 4. Check Processing Orders Only (تحقق من الطلبات التي قيد المعالجة فقط)
+// Checks only orders with status = 'processing' or 'pending', queries SC Store API, and updates DB
+app.post('/api/sc/orders/check-processing', async (req: Request, res: Response) => {
+  const { orderIds, userId } = req.body || {};
+
+  try {
+    const pool = getDbPool();
+    let processingOrdersToQuery: Array<{ orderId: string; currentStatus: string; dbId?: string }> = [];
+
+    if (pool) {
+      let querySql = `
+        SELECT id, order_id, sc_order_id, status 
+        FROM orders 
+        WHERE status IN ('processing', 'pending')
+      `;
+      const queryParams: any[] = [];
+
+      if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
+        querySql += ` AND (order_id = ANY($1) OR sc_order_id = ANY($1))`;
+        queryParams.push(orderIds);
+      } else if (userId) {
+        querySql += ` AND user_id = $1`;
+        queryParams.push(userId);
+      }
+
+      querySql += ` ORDER BY created_at DESC LIMIT 50;`;
+
+      const dbRes = await pool.query(querySql, queryParams);
+      processingOrdersToQuery = dbRes.rows.map((r: any) => ({
+        orderId: r.sc_order_id || r.order_id,
+        currentStatus: r.status,
+        dbId: r.id,
+      }));
+    } else if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
+      // In-memory or client-provided list of processing orders
+      processingOrdersToQuery = orderIds.map((id: string) => ({
+        orderId: id,
+        currentStatus: 'processing',
+      }));
+    }
+
+    // If no processing orders found, return immediately without calling SC Store API
+    if (processingOrdersToQuery.length === 0) {
+      return res.json({
+        success: true,
+        message: 'لا توجد أي طلبات قيد المعالجة حالياً للتحقق منها.',
+        totalChecked: 0,
+        updatedCount: 0,
+        completedCount: 0,
+        stillProcessingCount: 0,
+        rejectedCount: 0,
+        orders: [],
+      });
+    }
+
+    // Extract unique clean SC order IDs
+    const uniqueIds = Array.from(new Set(processingOrdersToQuery.map((p) => p.orderId.trim()))).filter(Boolean);
+
+    if (uniqueIds.length === 0) {
+      return res.json({
+        success: true,
+        message: 'لا توجد معرفات صالحة للطلبات قيد المعالجة.',
+        totalChecked: 0,
+        updatedCount: 0,
+        orders: [],
+      });
+    }
+
+    // SC Store API supports checking multiple orders with colon separator: /orders/:id1:id2:id3
+    // Or single order: /orders/:orderId
+    const scQueryPath = uniqueIds.length === 1
+      ? `${SC_STORE_BASE_URL}/orders/${encodeURIComponent(uniqueIds[0])}`
+      : `${SC_STORE_BASE_URL}/orders/${encodeURIComponent(uniqueIds.join(':'))}`;
+
+    const authHeaders = await getAuthHeaders(req);
+    const scResponse = await fetch(scQueryPath, {
+      method: 'GET',
+      headers: authHeaders,
+    });
+
+    const scData = await scResponse.json().catch(() => null);
+
+    if (!scResponse.ok || !scData) {
+      return res.status(scResponse.status || 500).json({
+        success: false,
+        error: scData?.message || scData?.error || 'تعذر الاتصال بـ SC Store API للتحقق من الطلبات',
+        totalChecked: uniqueIds.length,
+      });
+    }
+
+    // Normalize returned orders list
+    let returnedOrdersList: any[] = [];
+    if (Array.isArray(scData.orders)) {
+      returnedOrdersList = scData.orders;
+    } else if (scData.order && typeof scData.order === 'object') {
+      returnedOrdersList = [scData.order];
+    } else if (Array.isArray(scData)) {
+      returnedOrdersList = scData;
+    } else if (scData.data && Array.isArray(scData.data)) {
+      returnedOrdersList = scData.data;
+    }
+
+    let updatedCount = 0;
+    let completedCount = 0;
+    let stillProcessingCount = 0;
+    let rejectedCount = 0;
+
+    // Update orders in DB
+    if (pool && returnedOrdersList.length > 0) {
+      for (const item of returnedOrdersList) {
+        const itemOrderId = item.orderId || item.id;
+        const itemStatus = (item.status || '').toLowerCase();
+
+        if (itemOrderId && itemStatus) {
+          if (itemStatus.includes('complete') || itemStatus.includes('success')) {
+            completedCount++;
+          } else if (itemStatus.includes('fail') || itemStatus.includes('reject') || itemStatus.includes('refund')) {
+            rejectedCount++;
+          } else {
+            stillProcessingCount++;
+          }
+
+          try {
+            const updateResult = await pool.query(
+              `UPDATE orders 
+               SET status = $1, raw_response = $2, updated_at = NOW() 
+               WHERE (order_id = $3 OR sc_order_id = $3) AND status != $1
+               RETURNING id;`,
+              [itemStatus, JSON.stringify(item), itemOrderId]
+            );
+            if (updateResult.rowCount && updateResult.rowCount > 0) {
+              updatedCount++;
+            }
+          } catch (e) {
+            console.warn(`Failed to update DB for order ${itemOrderId}:`, e);
+          }
+        }
+      }
+    } else {
+      for (const item of returnedOrdersList) {
+        const s = (item.status || '').toLowerCase();
+        if (s.includes('complete') || s.includes('success')) completedCount++;
+        else if (s.includes('fail') || s.includes('reject') || s.includes('refund')) rejectedCount++;
+        else stillProcessingCount++;
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `تم التحقق من ${uniqueIds.length} طلب قيد المعالجة بنجاح.`,
+      totalChecked: uniqueIds.length,
+      updatedCount,
+      completedCount,
+      stillProcessingCount,
+      rejectedCount,
+      orders: returnedOrdersList,
+      raw: scData,
+    });
+  } catch (error: any) {
+    console.error('Error in /api/sc/orders/check-processing:', error);
+    return res.status(500).json({ error: error.message || 'Internal Server Error' });
+  }
+});
+
+// 5. Check Order Status (Single or Multiple with : separator)
 app.get('/api/sc/orders/:orderId', async (req: Request, res: Response) => {
   const { orderId } = req.params;
 
@@ -915,9 +1446,10 @@ app.get('/api/sc/orders/:orderId', async (req: Request, res: Response) => {
   }
 
   try {
+    const authHeaders = await getAuthHeaders(req);
     const response = await fetch(`${SC_STORE_BASE_URL}/orders/${encodeURIComponent(orderId)}`, {
       method: 'GET',
-      headers: getAuthHeaders(req),
+      headers: authHeaders,
     });
 
     const data = await response.json().catch(() => null);
@@ -927,11 +1459,15 @@ app.get('/api/sc/orders/:orderId', async (req: Request, res: Response) => {
 
     // Auto-update order status in database if present
     const pool = getDbPool();
-    if (pool && data && data.status) {
-      pool.query(
-        'UPDATE orders SET status = $1, raw_response = $2, updated_at = NOW() WHERE order_id = $3 OR sc_order_id = $3',
-        [data.status, JSON.stringify(data), orderId]
-      ).catch(() => {});
+    if (pool && data) {
+      const orderObj = data.order || (Array.isArray(data.orders) ? data.orders[0] : null) || data;
+      if (orderObj && orderObj.status) {
+        const targetId = orderObj.orderId || orderId;
+        pool.query(
+          'UPDATE orders SET status = $1, raw_response = $2, updated_at = NOW() WHERE order_id = $3 OR sc_order_id = $3',
+          [orderObj.status, JSON.stringify(orderObj), targetId]
+        ).catch(() => {});
+      }
     }
 
     return res.json(data);

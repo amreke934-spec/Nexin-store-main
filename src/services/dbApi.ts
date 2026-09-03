@@ -332,3 +332,48 @@ export async function checkAdminOrderDetails(orderId: string): Promise<AdminOrde
   }
 }
 
+export interface SyncProcessingOrdersResponse {
+  success: boolean;
+  totalChecked: number;
+  updatedCount: number;
+  completedCount: number;
+  stillProcessingCount: number;
+  rejectedCount: number;
+  orders: any[];
+  message: string;
+  error?: string;
+}
+
+/**
+ * Trigger backend check exclusively for orders in processing/pending status
+ */
+export async function syncProcessingOrdersInDb(options?: {
+  orderIds?: string[];
+  userId?: string;
+}): Promise<SyncProcessingOrdersResponse> {
+  try {
+    const res = await fetch('/api/sc/orders/check-processing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderIds: options?.orderIds,
+        userId: options?.userId,
+      }),
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return {
+      success: false,
+      totalChecked: 0,
+      updatedCount: 0,
+      completedCount: 0,
+      stillProcessingCount: 0,
+      rejectedCount: 0,
+      orders: [],
+      message: err.message || 'فشل الاتصال بخدمة التحقق من الطلبات',
+      error: err.message,
+    };
+  }
+}
+

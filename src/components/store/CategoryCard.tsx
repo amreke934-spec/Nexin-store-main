@@ -10,6 +10,7 @@ import {
   Radio, 
   Sparkles,
   ChevronLeft,
+  CreditCard,
   LucideIcon 
 } from 'lucide-react';
 
@@ -33,48 +34,36 @@ const CATEGORY_VISUALS: Record<string, {
 }> = {
   'ألعاب رقمية': {
     icon: Gamepad2,
-    image: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/game-charge.png',
     badge: 'الأكثر طلباً',
     shortSubtitle: 'شحن ألعاب بالـ ID',
   },
   'تطبيقات ومحادثات': {
     icon: MessageSquare,
-    image: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/app-charge.png',
     badge: 'تفعيل فوري',
     shortSubtitle: 'كوينز وجواهر بث',
   },
-  'خدمات تيليجرام': {
-    icon: Send,
-    image: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
-    badge: 'بريميوم',
-    shortSubtitle: 'اشتراكات Telegram',
-  },
-  'اشتراكات بريميوم': {
-    icon: Crown,
-    image: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
-    badge: 'رسمي',
-    shortSubtitle: 'أنغامي وشاهد وسبوتيفاي',
-  },
   'بطاقات وأكواد': {
-    icon: Gift,
-    image: 'https://images.unsplash.com/photo-1563089145-599997674d42?w=600&auto=format&fit=crop&q=80',
-    badge: 'أكواد جاهزة',
-    shortSubtitle: 'بطاقات وقسائم فورية',
+    icon: CreditCard,
+    image: 'https://sc-store.top/api/icons/cards/51',
+    badge: 'أكواد رسمية',
+    shortSubtitle: 'أكواد وكروت رقمية',
   },
   'خدمات الكاش': {
     icon: Wallet,
-    image: 'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/syriatel-cash.png',
     badge: 'كاش مباشر',
     shortSubtitle: 'تحويل وتعبئة كاش',
   },
   'وحدات سيريتل': {
     icon: Smartphone,
-    image: 'https://images.unsplash.com/photo-1563986768609-322da13575f3?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/syriatel.png',
     shortSubtitle: 'تعبئة وحدات فورية',
   },
   'وحدات MTN': {
     icon: Radio,
-    image: 'https://images.unsplash.com/photo-1556742049-0a67e557b447?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/mtn.png',
     shortSubtitle: 'تعبئة وحدات فورية',
   },
 };
@@ -85,7 +74,7 @@ export const CategoryCard: React.FC<CategoryCardProps> = React.memo(({
 }) => {
   const visual = CATEGORY_VISUALS[category.name] || {
     icon: Sparkles,
-    image: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/game-charge.png',
     shortSubtitle: 'باقات شحن فورية',
   };
 

@@ -126,15 +126,28 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         cleanedFields['Player_ID'] = mainVal;
       }
 
-      const payload = {
-        productId: product.productId,
-        qty: qty,
-        dynamicFields: cleanedFields,
-      };
+      let payload: any;
+      if (product.isCash || product.sectionKey === 'cashbalances' || (product as any).cashType) {
+        payload = {
+          cashType: (product as any).cashType || 'syriatel-cash',
+          amount: Number(cleanedFields['amount'] || qty || product.price),
+          wallet: cleanedFields['wallet'] || cleanedFields['phone_number'] || cleanedFields['Player_ID'] || '',
+          dynamicFields: cleanedFields,
+        };
+      } else {
+        payload = {
+          productId: product.productId,
+          qty: qty,
+          dynamicFields: cleanedFields,
+        };
+      }
 
       const result = await createNewOrder(payload);
 
       if (result.success && result.orderId) {
+        const rawStatus = (result.data?.order?.status || result.data?.status || 'processing').toLowerCase();
+        const initialStatus = rawStatus.includes('complete') ? 'completed' : 'processing';
+
         const newOrder: OrderItem = {
           id: result.orderId,
           orderId: result.orderId,
@@ -144,9 +157,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           qty: qty,
           price: product.price,
           total: product.price * qty,
-          currency: product.currency || 'USD',
+          currency: product.currency || 'SYP',
           dynamicFields: cleanedFields,
-          status: 'completed',
+          status: initialStatus,
           createdAt: new Date().toISOString(),
           customerName: currentUser?.name,
           customerEmail: currentUser?.email,
@@ -390,16 +403,35 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                         <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
                           {fieldLabel} <span className="text-red-500">*</span>
                         </label>
-                        <input
-                          id={`input-dynamic-${fieldName}`}
-                          type={serviceType === 'cash' || serviceType === 'telecom' ? 'tel' : 'text'}
-                          required
-                          value={dynamicFields[fieldName] || ''}
-                          onChange={(e) => handleFieldChange(fieldName, e.target.value)}
-                          placeholder={placeholder}
-                          dir="ltr"
-                          className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl text-xs sm:text-sm text-[#1A1A1A] dark:text-white font-mono placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-[#7F00FF] dark:focus:border-purple-500 focus:bg-white dark:focus:bg-white/10 transition-all text-right"
-                        />
+                        {field.options && Array.isArray(field.options) && field.options.length > 0 ? (
+                          <select
+                            id={`input-dynamic-${fieldName}`}
+                            required
+                            value={dynamicFields[fieldName] || ''}
+                            onChange={(e) => handleFieldChange(fieldName, e.target.value)}
+                            className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl text-xs sm:text-sm text-[#1A1A1A] dark:text-white font-medium focus:outline-none focus:border-[#7F00FF] dark:focus:border-purple-500 focus:bg-white dark:focus:bg-white/10 transition-all text-right cursor-pointer"
+                          >
+                            <option value="" className="text-gray-400 dark:bg-[#1A1A1A]">
+                              -- اختر {fieldLabel} --
+                            </option>
+                            {field.options.map((opt: string) => (
+                              <option key={opt} value={opt} className="text-gray-900 dark:text-white dark:bg-[#1A1A1A]">
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            id={`input-dynamic-${fieldName}`}
+                            type={serviceType === 'cash' || serviceType === 'telecom' ? 'tel' : 'text'}
+                            required
+                            value={dynamicFields[fieldName] || ''}
+                            onChange={(e) => handleFieldChange(fieldName, e.target.value)}
+                            placeholder={placeholder}
+                            dir="ltr"
+                            className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl text-xs sm:text-sm text-[#1A1A1A] dark:text-white font-mono placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-[#7F00FF] dark:focus:border-purple-500 focus:bg-white dark:focus:bg-white/10 transition-all text-right"
+                          />
+                        )}
                         {helper && (
                           <p className="text-[11px] text-gray-400 dark:text-gray-500 flex items-center gap-1">
                             <HelpCircle className="w-3 h-3 text-gray-400 shrink-0" />

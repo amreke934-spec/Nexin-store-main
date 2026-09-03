@@ -9,6 +9,7 @@ import {
   Smartphone, 
   Radio, 
   Sparkles,
+  CreditCard,
   LucideIcon 
 } from 'lucide-react';
 
@@ -32,50 +33,38 @@ interface CategoriesGridProps {
 // Visual metadata for category styling
 const CATEGORY_VISUALS: Record<string, { description: string; icon: LucideIcon; image: string; badge?: string }> = {
   'ألعاب رقمية': {
-    description: 'شحن فوري لببجي، فري فاير، جواكر، كلاش أوف كلانس...',
+    description: 'شحن فوري بالـ ID لببجي موبايل، فري فاير، بلود سترايك، كلاش رويال...',
     icon: Gamepad2,
-    image: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/game-charge.png',
     badge: 'الأكثر طلباً',
   },
   'تطبيقات ومحادثات': {
-    description: 'شحن كوينز وجواهر HaloStar, Bigo Live, PoppoLive...',
+    description: 'شحن كوينز وجواهر Bigo Live, Poppo Live, Soul Chill, Meyo, Olamet...',
     icon: MessageSquare,
-    image: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/app-charge.png',
     badge: 'تفعيل فوري',
   },
-  'خدمات تيليجرام': {
-    description: 'اشتراكات Telegram Premium الشهرية والسنوية بالـ ID',
-    icon: Send,
-    image: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
-    badge: 'بريميوم',
-  },
-  'اشتراكات بريميوم': {
-    description: 'باقات أنغامي بلس، شاهد، سبوتيفاي، ديسكورد وغيرها',
-    icon: Crown,
-    image: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
-    badge: 'رسمي 100%',
-  },
   'بطاقات وأكواد': {
-    description: 'أكواد شحن Free Fire PINs، بطاقات الهدايا الرقمية',
-    icon: Gift,
-    image: 'https://images.unsplash.com/photo-1563089145-599997674d42?w=600&auto=format&fit=crop&q=80',
-    badge: 'أكواد جاهزة',
+    description: 'أكواد وكروت شحن رقمية فورية (PUBG Pins & Free Fire Codes)',
+    icon: CreditCard,
+    image: 'https://sc-store.top/api/icons/cards/51',
+    badge: 'أكواد رسمية',
   },
   'خدمات الكاش': {
     description: 'تحويل وتعبئة رصيد سيريتل كاش و MTN كاش الفوري',
     icon: Wallet,
-    image: 'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/syriatel-cash.png',
     badge: 'كاش مباشر',
   },
   'وحدات سيريتل': {
-    description: 'تعبئة وتحويل رصيد وحدات سيريتل (Syriatel)',
+    description: 'تعبئة وتحويل رصيد وحدات سيريتل (Syriatel) الفورية',
     icon: Smartphone,
-    image: 'https://images.unsplash.com/photo-1563986768609-322da13575f3?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/syriatel.png',
   },
   'وحدات MTN': {
     description: 'تعبئة وتحويل رصيد وحدات MTN الفورية',
     icon: Radio,
-    image: 'https://images.unsplash.com/photo-1556742049-0a67e557b447?w=600&auto=format&fit=crop&q=80',
+    image: 'https://sc-store.top/logos/mtn.png',
   },
 };
 
@@ -149,7 +138,7 @@ export const CategoriesGrid: React.FC<CategoriesGridProps> = ({
           const visual = CATEGORY_VISUALS[cat.name] || {
             description: `تصفح باقات ومنتجات ${cat.name}`,
             icon: Gamepad2,
-            image: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80',
+            image: 'https://sc-store.top/logos/game-charge.png',
           };
           const IconComponent = visual.icon;
           const isSelected = selectedCategory.toLowerCase() === cat.name.toLowerCase();

@@ -1,57 +1,85 @@
-import { MerchantInfo, Product, CreateOrderPayload, DynamicFieldConfig } from '../types';
+import { MerchantInfo, Product, CreateOrderPayload, DynamicFieldConfig, OrderItem } from '../types';
 import { getProductServiceType } from '../utils/productUtils';
 
 export const DEFAULT_API_KEY = 'sc_xIfrLuz7-N0HT-8xsM-zwg6-iLbNBrEhKag2';
 
-// Helper to assign reliable icons / art for game names if none provided in API
-const getGameCover = (gameName: string, category: string, rawImage?: string): string => {
-  if (rawImage) {
-    if (rawImage.startsWith('http://') || rawImage.startsWith('https://')) {
-      return rawImage;
+// Helper to assign reliable real SC Store icons for products and games
+export const getGameCover = (gameName: string, category: string, rawImage?: string): string => {
+  if (rawImage && typeof rawImage === 'string') {
+    const clean = rawImage.trim();
+    if (clean.startsWith('http://') || clean.startsWith('https://')) {
+      return clean;
     }
-    if (rawImage.startsWith('/')) {
-      return `https://sc-store.top${rawImage}`;
+    if (clean.startsWith('/')) {
+      return `https://sc-store.top${clean}`;
     }
   }
 
   const name = (gameName || '').toLowerCase();
   
-  if (name.includes('free fire') || name.includes('freefire')) {
-    return 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=500&auto=format&fit=crop&q=60';
+  if (name.includes('pubg') || name.includes('ببجي')) {
+    if (name.includes('code') || name.includes('كود') || name.includes('pin') || category.includes('بطاق') || category.includes('أكواد')) {
+      return 'https://sc-store.top/api/icons/cards/51';
+    }
+    return 'https://sc-store.top/api/icons/game-charge/13';
   }
-  if (name.includes('pubg')) {
-    return 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=500&auto=format&fit=crop&q=60';
+  if (name.includes('free fire') || name.includes('freefire') || name.includes('فاير')) {
+    if (name.includes('code') || name.includes('كود') || name.includes('pin') || category.includes('بطاق') || category.includes('أكواد')) {
+      return 'https://sc-store.top/api/icons/cards/52';
+    }
+    if (name.includes('عضو') || name.includes('member')) {
+      return 'https://sc-store.top/api/icons/game-charge/15';
+    }
+    return 'https://sc-store.top/api/icons/game-charge/14';
   }
-  if (name.includes('jawaker')) {
-    return 'https://images.unsplash.com/photo-1511193311914-0346f16efe90?w=500&auto=format&fit=crop&q=60';
+  if (name.includes('blood strike') || name.includes('bloodstrike') || name.includes('بلود سترايك')) {
+    return 'https://sc-store.top/api/icons/game-charge/39';
   }
-  if (name.includes('clash of clans') || name.includes('clash royale')) {
-    return 'https://images.unsplash.com/photo-1563089145-599997674d42?w=500&auto=format&fit=crop&q=60';
+  if (name.includes('clash') || name.includes('royal') || name.includes('كلاش')) {
+    return 'https://sc-store.top/api/icons/game-charge/67';
   }
-  if (name.includes('blood strike') || name.includes('arena breakout') || name.includes('delta force')) {
-    return 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=500&auto=format&fit=crop&q=60';
+  if (name.includes('bigo') || name.includes('بيجو')) {
+    return 'https://sc-store.top/api/icons/app-charge/17';
   }
-  if (name.includes('roblox')) {
-    return 'https://images.unsplash.com/photo-1566576912321-d58ddd7a6088?w=500&auto=format&fit=crop&q=60';
+  if (name.includes('meyo') || name.includes('ميو')) {
+    return 'https://sc-store.top/api/icons/app-charge/26';
   }
-  if (name.includes('telegram')) {
-    return 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=60';
+  if (name.includes('olamet') || name.includes('اولاميت')) {
+    return 'https://sc-store.top/api/icons/app-charge/78';
   }
-  if (name.includes('anghami') || name.includes('spotify') || name.includes('music')) {
-    return 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=60';
+  if (name.includes('party') || name.includes('بارتي')) {
+    return 'https://sc-store.top/api/icons/app-charge/19';
   }
-  if (name.includes('syriatel') || category === 'سيريتل') {
-    return 'https://images.unsplash.com/photo-1563986768609-322da13575f3?w=500&auto=format&fit=crop&q=60';
+  if (name.includes('poppo') || name.includes('بوبو')) {
+    return 'https://sc-store.top/api/icons/app-charge/18';
   }
-  if (name.includes('mtn') || category === 'MTN') {
-    return 'https://images.unsplash.com/photo-1556742049-0a67e557b447?w=500&auto=format&fit=crop&q=60';
+  if (name.includes('pota') || name.includes('بوتا')) {
+    return 'https://sc-store.top/api/icons/app-charge/200';
+  }
+  if (name.includes('soul') || name.includes('سول')) {
+    return 'https://sc-store.top/api/icons/app-charge/16';
+  }
+  if (name.includes('mtn') || category.includes('MTN')) {
+    return 'https://sc-store.top/logos/mtn.png';
+  }
+  if (name.includes('syriatel') || category.includes('سيريتل')) {
+    return 'https://sc-store.top/logos/syriatel.png';
+  }
+  if (name.includes('كاش') || category.includes('كاش')) {
+    return 'https://sc-store.top/logos/syriatel-cash.png';
   }
 
-  // Default clean gaming background
-  return 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=500&auto=format&fit=crop&q=60';
+  // Default to authentic SC Store section icon
+  if (category.includes('تطبيق') || category.includes('محادث')) {
+    return 'https://sc-store.top/logos/app-charge.png';
+  }
+  if (category.includes('بطاق') || category.includes('كود')) {
+    return 'https://sc-store.top/api/icons/cards/51';
+  }
+  return 'https://sc-store.top/logos/game-charge.png';
 };
 
-// Section label translation to Arabic
+// Section label translation to Arabic for authentic SC Store API sections
 const getSectionLabel = (sectionKey: string): string => {
   switch (sectionKey.toLowerCase()) {
     case 'games':
@@ -62,12 +90,6 @@ const getSectionLabel = (sectionKey: string): string => {
       return 'وحدات MTN';
     case 'syriatel':
       return 'وحدات سيريتل';
-    case 'telegramservices':
-      return 'خدمات تيليجرام';
-    case 'subscriptions':
-      return 'اشتراكات بريميوم';
-    case 'cardandcodes':
-      return 'بطاقات وأكواد';
     case 'cashbalances':
       return 'خدمات الكاش';
     default:
@@ -301,11 +323,20 @@ export async function fetchMerchantInfo(apiKey?: string): Promise<{ data: Mercha
   }
 }
 
+export interface FetchProductsResult {
+  products: Product[];
+  error?: string;
+  rawCount?: number;
+  isFallback?: boolean;
+  apiStatus?: number;
+  apiMessage?: string;
+}
+
 /**
- * 2. Fetch and parse 100% real products from https://sc-store.top/api/v1/products
- * Strictly NO fallback, mock, or fake items.
+ * 2. Fetch and parse products from SC Store API
+ * Includes authentic data caching and image support
  */
-export async function fetchProducts(apiKey?: string): Promise<{ products: Product[]; error?: string; rawCount?: number }> {
+export async function fetchProducts(apiKey?: string): Promise<FetchProductsResult> {
   try {
     const headers: Record<string, string> = {};
     if (apiKey) {
@@ -315,7 +346,7 @@ export async function fetchProducts(apiKey?: string): Promise<{ products: Produc
     const res = await fetch('/api/sc/products', { headers });
     const json = await res.json().catch(() => null);
 
-    if (!res.ok || !json || json.error) {
+    if (!json || (!json.products && (json.error || !res.ok))) {
       const errMsg = json?.message || json?.error || `فشل جلب المنتجات من الـ API (كود: ${res.status})`;
       return { products: [], error: errMsg };
     }
@@ -323,17 +354,102 @@ export async function fetchProducts(apiKey?: string): Promise<{ products: Produc
     const rawContainer = json.products || json.data || json;
     const normalizedProducts: Product[] = [];
 
-    // Case A: products is an object containing sections: games, apps, mtn, syriatel, telegramservices, subscriptions, cardandcodes, cashbalances
+    // Case A: products is an object containing categorized sections: games, apps, cards, subscriptions, mtn, syriatel, cashbalances, etc.
     if (typeof rawContainer === 'object' && rawContainer !== null && !Array.isArray(rawContainer)) {
       
-      // 1. Direct products arrays: games, apps, mtn, syriatel
-      const directSections = ['games', 'apps', 'mtn', 'syriatel'];
-      for (const sec of directSections) {
-        if (Array.isArray(rawContainer[sec])) {
-          const catLabel = getSectionLabel(sec);
-          for (const item of rawContainer[sec]) {
+      for (const [secKey, secValue] of Object.entries(rawContainer)) {
+        if (!Array.isArray(secValue)) continue;
+
+        // 1. Cash Balances
+        if (secKey.toLowerCase() === 'cashbalances') {
+          const catLabel = getSectionLabel('cashbalances');
+          for (const cash of secValue) {
+            const id = cash.type || `cash_${cash.label || 'service'}`;
+            const minAmt = cash.minAmount || 5000;
+            const maxAmt = cash.maxAmount || 5000000;
+            const cashImage = cash.image_url || cash.Image_url || cash.image;
+
+            normalizedProducts.push({
+              id: id,
+              productId: id,
+              name: cash.label || 'خدمة كاش سريعة',
+              category: catLabel,
+              gameName: cash.label || 'تحويل رصيد كاش',
+              sectionKey: 'cashbalances',
+              price: minAmt,
+              currency: 'SYP',
+              image: getGameCover(cash.label, catLabel, cashImage),
+              description: cash.note || `شحن وتحويل رصيد كاش فوري. عمولة الخدمة ${((cash.feeRate || 0.02) * 100).toFixed(0)}%. الحدود: ${minAmt.toLocaleString()} إلى ${maxAmt.toLocaleString()} ل.س`,
+              dynamicFields: [
+                {
+                  name: 'wallet',
+                  label: 'رقم محفظة الكاش / هاتف المستلم',
+                  placeholder: 'مثال: 0912345678',
+                  required: true,
+                },
+                {
+                  name: 'amount',
+                  label: `المبلغ المطلوب بالليرة السورية (${minAmt.toLocaleString()} - ${maxAmt.toLocaleString()})`,
+                  placeholder: `أدخل مبلغ بين ${minAmt.toLocaleString()} و ${maxAmt.toLocaleString()}`,
+                  required: true,
+                },
+              ],
+              inStock: true,
+              minQty: minAmt,
+              maxQty: maxAmt,
+              isAmount: true,
+              isCash: true,
+              cashType: cash.type,
+              feeRate: cash.feeRate,
+              badge: 'كاش فوري',
+            });
+          }
+          continue;
+        }
+
+        // 2. Products Sections (games, apps, cards, subscriptions, mtn, syriatel, etc.)
+        const catLabel = getSectionLabel(secKey);
+
+        for (const item of secValue) {
+          // If item contains a nested packages array (e.g. grouped services)
+          if (Array.isArray(item.packages) && item.packages.length > 0) {
+            const groupGameName = item.gameName || item.name || catLabel;
+            const groupImage = item.image_url || item.Image_url || item.image;
+
+            for (const pkg of item.packages) {
+              const rawId = pkg.id !== undefined ? pkg.id : pkg.productId;
+              const price = typeof pkg.price === 'number' ? pkg.price : parseFloat(pkg.price) || 0;
+
+              normalizedProducts.push({
+                id: String(rawId),
+                productId: rawId,
+                name: pkg.name || `${groupGameName} - باقة #${rawId}`,
+                category: catLabel,
+                gameName: groupGameName,
+                sectionKey: secKey,
+                price: price,
+                originalPrice: price > 0 ? Number((price * 1.1).toFixed(2)) : undefined,
+                pricePerUnit: pkg.pricePerUnit,
+                currency: pkg.currency || 'SYP',
+                image: getGameCover(groupGameName, catLabel, pkg.image_url || pkg.Image_url || pkg.image || groupImage),
+                description: `باقة رقمية أصلية لـ ${groupGameName} مع تفعيل وتسليم فوري.`,
+                dynamicFields: normalizeDynamicFields(pkg.dynamicFields, {
+                  category: catLabel,
+                  gameName: groupGameName,
+                  name: pkg.name,
+                  sectionKey: secKey,
+                }),
+                inStock: pkg.inStock !== false,
+                minQty: pkg.minQty,
+                maxQty: pkg.maxQty,
+                isAmount: pkg.isAmount,
+              });
+            }
+          } else {
+            // Direct product item (Standard SC Store format)
             const rawId = item.id !== undefined ? item.id : item.productId;
-            const gameName = item.gameName || (sec === 'mtn' ? 'MTN' : sec === 'syriatel' ? 'سيريتل' : catLabel);
+            const defaultNameForSec = secKey === 'mtn' ? 'MTN' : secKey === 'syriatel' ? 'سيريتل' : catLabel;
+            const gameName = item.gameName || item.serviceName || defaultNameForSec;
             const price = typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0;
             const pricePerUnit = typeof item.pricePerUnit === 'number' ? item.pricePerUnit : undefined;
 
@@ -343,18 +459,18 @@ export async function fetchProducts(apiKey?: string): Promise<{ products: Produc
               name: item.name || `${gameName} - باقة #${rawId}`,
               category: catLabel,
               gameName: gameName,
-              sectionKey: sec,
+              sectionKey: secKey,
               price: price,
               originalPrice: price > 0 ? Number((price * 1.1).toFixed(2)) : undefined,
               pricePerUnit: pricePerUnit,
-              currency: item.currency || 'USD',
-              image: getGameCover(gameName, catLabel, item.image),
+              currency: item.currency || 'SYP',
+              image: getGameCover(gameName, catLabel, item.image_url || item.Image_url || item.image),
               description: item.gameName ? `شحن فوري لباقة ${item.name} الخاصة بـ ${item.gameName}` : `شحن مباشر فوري وسريع.`,
               dynamicFields: normalizeDynamicFields(item.dynamicFields, {
                 category: catLabel,
                 gameName: gameName,
                 name: item.name,
-                sectionKey: sec,
+                sectionKey: secKey,
               }),
               inStock: item.inStock !== false,
               isAmount: item.isAmount,
@@ -363,85 +479,6 @@ export async function fetchProducts(apiKey?: string): Promise<{ products: Produc
               badge: item.isAmount ? 'حسب الكمية' : undefined,
             });
           }
-        }
-      }
-
-      // 2. Nested packages: telegramservices, subscriptions, cardandcodes
-      const nestedSections = ['telegramservices', 'subscriptions', 'cardandcodes'];
-      for (const sec of nestedSections) {
-        if (Array.isArray(rawContainer[sec])) {
-          const catLabel = getSectionLabel(sec);
-          for (const group of rawContainer[sec]) {
-            const groupGameName = group.gameName || group.name || catLabel;
-            const groupImage = group.image;
-
-            if (Array.isArray(group.packages)) {
-              for (const pkg of group.packages) {
-                const rawId = pkg.id !== undefined ? pkg.id : pkg.productId;
-                const price = typeof pkg.price === 'number' ? pkg.price : parseFloat(pkg.price) || 0;
-
-                normalizedProducts.push({
-                  id: String(rawId),
-                  productId: rawId,
-                  name: pkg.name || `${groupGameName} - باقة #${rawId}`,
-                  category: catLabel,
-                  gameName: groupGameName,
-                  sectionKey: sec,
-                  price: price,
-                  originalPrice: price > 0 ? Number((price * 1.1).toFixed(2)) : undefined,
-                  pricePerUnit: pkg.pricePerUnit,
-                  currency: pkg.currency || 'USD',
-                  image: getGameCover(groupGameName, catLabel, groupImage),
-                  description: `باقة رقمية أصلية لـ ${groupGameName} مع تفعيل وتسليم فوري.`,
-                  dynamicFields: normalizeDynamicFields(pkg.dynamicFields, {
-                    category: catLabel,
-                    gameName: groupGameName,
-                    name: pkg.name,
-                    sectionKey: sec,
-                  }),
-                  inStock: pkg.inStock !== false,
-                  minQty: pkg.minQty,
-                  maxQty: pkg.maxQty,
-                  isAmount: pkg.isAmount,
-                });
-              }
-            }
-          }
-        }
-      }
-
-      // 3. Cash balances
-      if (Array.isArray(rawContainer.cashbalances)) {
-        const catLabel = getSectionLabel('cashbalances');
-        for (const cash of rawContainer.cashbalances) {
-          const id = cash.type || `cash_${cash.label || 'service'}`;
-          normalizedProducts.push({
-            id: id,
-            productId: id,
-            name: cash.label || 'خدمة كاش سريعة',
-            category: catLabel,
-            gameName: cash.label || 'تحويل رصيد كاش',
-            sectionKey: 'cashbalances',
-            price: cash.minAmount || 0,
-            currency: 'SYP',
-            image: getGameCover(cash.label, catLabel, cash.image),
-            description: cash.note || `شحن وتحويل رصيد كاش فوري. عمولة الخدمة ${((cash.feeRate || 0) * 100).toFixed(0)}%.`,
-            dynamicFields: normalizeDynamicFields(cash.fields, {
-              category: catLabel,
-              gameName: cash.label,
-              name: cash.label,
-              sectionKey: 'cashbalances',
-              isCash: true,
-            }),
-            inStock: true,
-            isCash: true,
-            cashType: cash.type,
-            feeRate: cash.feeRate,
-            note: cash.note,
-            minQty: cash.minAmount,
-            maxQty: cash.maxAmount,
-            badge: 'كاش مباشر',
-          });
         }
       }
     } else if (Array.isArray(rawContainer)) {
@@ -458,8 +495,8 @@ export async function fetchProducts(apiKey?: string): Promise<{ products: Produc
           category: item.category || 'عام',
           gameName: gameName,
           price: price,
-          currency: item.currency || 'USD',
-          image: getGameCover(gameName, item.category || '', item.image),
+          currency: item.currency || 'SYP',
+          image: getGameCover(gameName, item.category || 'عام', item.image_url || item.Image_url || item.image),
           description: item.description || `شحن رقمي مباشر وفوري.`,
           dynamicFields: normalizeDynamicFields(item.dynamicFields, {
             category: item.category,
@@ -485,6 +522,9 @@ export async function fetchProducts(apiKey?: string): Promise<{ products: Produc
     return {
       products: normalizedProducts,
       rawCount: normalizedProducts.length,
+      isFallback: json?.isFallback,
+      apiStatus: json?.apiStatus,
+      apiMessage: json?.apiMessage,
     };
   } catch (err: any) {
     return {
@@ -518,7 +558,13 @@ export async function createNewOrder(
     const json = await res.json().catch(() => null);
 
     if (res.ok && json && !json.error) {
-      const orderId = json.orderId || json.id || json.data?.orderId || json.data?.id || `ORD-${Date.now()}`;
+      const orderId =
+        json.order?.orderId ||
+        json.orderId ||
+        json.id ||
+        json.data?.orderId ||
+        json.data?.id ||
+        `ORD-${Date.now()}`;
       return {
         success: true,
         data: json,
@@ -575,5 +621,173 @@ export async function checkOrdersStatus(
       success: false,
       error: err.message || 'خطأ أثناء الاستعلام عن حالة الطلب',
     };
+  }
+}
+
+/**
+ * Helper to determine if an order status is considered "processing" / "pending"
+ */
+export function isProcessingStatus(status?: string): boolean {
+  if (!status) return false;
+  const s = status.toLowerCase().trim();
+  return (
+    s === 'processing' ||
+    s === 'pending' ||
+    s === 'in_progress' ||
+    s === 'in-progress' ||
+    s.includes('معالجة') ||
+    s.includes('تنفيذ') ||
+    s.includes('انتظار')
+  );
+}
+
+export interface CheckProcessingOrdersResult {
+  success: boolean;
+  totalChecked: number;
+  updatedCount: number;
+  completedCount: number;
+  stillProcessingCount: number;
+  rejectedCount: number;
+  orders: any[];
+  message: string;
+  error?: string;
+}
+
+/**
+ * 5. Check Only Processing Orders (تحقق من الطلبات التي قيد المعالجة فقط)
+ * Filters orders strictly for status === 'processing' or 'pending' and checks them via API.
+ */
+export async function checkProcessingOrdersOnly(
+  ordersOrIds: Array<OrderItem | string>,
+  options?: { apiKey?: string; userId?: string }
+): Promise<CheckProcessingOrdersResult> {
+  try {
+    // 1. Filter strictly for processing orders
+    const candidateIds: string[] = [];
+
+    for (const item of ordersOrIds) {
+      if (typeof item === 'string') {
+        if (item.trim()) candidateIds.push(item.trim());
+      } else if (item && typeof item === 'object') {
+        if (isProcessingStatus(item.status)) {
+          const id = item.orderId || item.id;
+          if (id) candidateIds.push(String(id).trim());
+        }
+      }
+    }
+
+    const uniqueIds = Array.from(new Set(candidateIds));
+
+    // If no candidate orders are in processing status, return immediately without unneeded API calls
+    if (uniqueIds.length === 0) {
+      return {
+        success: true,
+        totalChecked: 0,
+        updatedCount: 0,
+        completedCount: 0,
+        stillProcessingCount: 0,
+        rejectedCount: 0,
+        orders: [],
+        message: 'لا توجد أي طلبات قيد المعالجة حالياً. جميع طلباتك مكتملة أو نهائية.',
+      };
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (options?.apiKey) {
+      headers['X-Api-Key'] = options.apiKey;
+    }
+
+    const res = await fetch('/api/sc/orders/check-processing', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        orderIds: uniqueIds,
+        userId: options?.userId,
+      }),
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (res.ok && json && json.success !== false) {
+      return {
+        success: true,
+        totalChecked: json.totalChecked ?? uniqueIds.length,
+        updatedCount: json.updatedCount ?? 0,
+        completedCount: json.completedCount ?? 0,
+        stillProcessingCount: json.stillProcessingCount ?? 0,
+        rejectedCount: json.rejectedCount ?? 0,
+        orders: json.orders || [],
+        message: json.message || `تم التحقق من ${uniqueIds.length} طلب قيد المعالجة بنجاح.`,
+      };
+    } else {
+      return {
+        success: false,
+        totalChecked: uniqueIds.length,
+        updatedCount: 0,
+        completedCount: 0,
+        stillProcessingCount: uniqueIds.length,
+        rejectedCount: 0,
+        orders: [],
+        message: json?.error || json?.message || 'تعذر التحقق من الطلبات قيد المعالجة',
+        error: json?.error,
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      totalChecked: 0,
+      updatedCount: 0,
+      completedCount: 0,
+      stillProcessingCount: 0,
+      rejectedCount: 0,
+      orders: [],
+      message: err.message || 'خطأ أثناء فحص الطلبات قيد المعالجة',
+      error: err.message,
+    };
+  }
+}
+
+/**
+ * 6. Get Active SC Store API Key info (masked)
+ */
+export async function getScApiKeyStatus(): Promise<{
+  hasCustomKey: boolean;
+  isDefault: boolean;
+  maskedKey: string;
+  keyLength: number;
+  prefix: string;
+}> {
+  try {
+    const res = await fetch('/api/sc/api-key');
+    const data = await res.json();
+    return data;
+  } catch {
+    return { hasCustomKey: false, isDefault: true, maskedKey: 'غير متوفر', keyLength: 0, prefix: '' };
+  }
+}
+
+/**
+ * 7. Update and test SC Store API Key live
+ */
+export async function updateScApiKey(apiKey: string): Promise<{
+  success: boolean;
+  message: string;
+  maskedKey?: string;
+  merchant?: any;
+  detail?: string;
+  status?: number;
+}> {
+  try {
+    const res = await fetch('/api/sc/api-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return { success: false, message: err.message || 'فشل الاتصال بالخادم' };
   }
 }

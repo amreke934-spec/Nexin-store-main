@@ -39,7 +39,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect }) =
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
             onError={(e) => {
               (e.target as HTMLImageElement).src =
-                'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=500&auto=format&fit=crop&q=60';
+                'https://sc-store.top/logos/game-charge.png';
             }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />

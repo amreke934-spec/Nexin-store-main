@@ -180,7 +180,7 @@ export default function App() {
     try {
       const res = await fetchProducts();
       setProducts(res.products);
-      if (res.error) {
+      if (res.error && (!res.products || res.products.length === 0)) {
         setProductsError(res.error);
       }
     } catch (e: any) {

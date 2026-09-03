@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   Package, 
   Search, 
@@ -16,11 +16,12 @@ import {
   SlidersHorizontal,
   ExternalLink,
   ShieldCheck,
-  Gamepad2
+  Gamepad2,
+  Filter
 } from 'lucide-react';
 import { CustomerUser, OrderItem } from '../types';
 import { formatPriceSyp } from '../utils/currencyUtils';
-import { checkOrdersStatus } from '../services/scStoreApi';
+import { checkOrdersStatus, checkProcessingOrdersOnly, isProcessingStatus } from '../services/scStoreApi';
 
 interface OrdersHistoryPageProps {
   currentUser: CustomerUser | null;
@@ -54,13 +55,108 @@ export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = React.memo(({
   const [refreshingOrderId, setRefreshingOrderId] = useState<string | null>(null);
   const [customUpdatedStatuses, setCustomUpdatedStatuses] = useState<Record<string, string>>({});
 
+  // Batch checking processing orders state
+  const [isCheckingProcessingOnly, setIsCheckingProcessingOnly] = useState<boolean>(false);
+  const [processingCheckFeedback, setProcessingCheckFeedback] = useState<{
+    type: 'success' | 'info' | 'error';
+    message: string;
+  } | null>(null);
+
+  // Calculate processing orders count
+  const processingOrdersList = useMemo(() => {
+    return orders.filter((o) => {
+      const current = customUpdatedStatuses[o.orderId] || o.status;
+      return isProcessingStatus(current);
+    });
+  }, [orders, customUpdatedStatuses]);
+
+  const completedOrdersCount = useMemo(() => {
+    return orders.filter((o) => {
+      const s = (customUpdatedStatuses[o.orderId] || o.status || '').toLowerCase();
+      return s.includes('complete') || s.includes('success') || s.includes('تم');
+    }).length;
+  }, [orders, customUpdatedStatuses]);
+
+  const failedOrdersCount = useMemo(() => {
+    return orders.filter((o) => {
+      const s = (customUpdatedStatuses[o.orderId] || o.status || '').toLowerCase();
+      return s.includes('fail') || s.includes('reject') || s.includes('مرفوض') || s.includes('فشل');
+    }).length;
+  }, [orders, customUpdatedStatuses]);
+
   const handleCopy = (id: string) => {
     navigator.clipboard.writeText(id);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Check specific order live status from API
+  // Check ONLY processing orders from SC Store API
+  const handleCheckProcessingOrdersOnly = useCallback(async () => {
+    if (processingOrdersList.length === 0) {
+      setProcessingCheckFeedback({
+        type: 'info',
+        message: 'لا توجد أي طلبات قيد المعالجة حالياً. جميع طلباتك مكتملة أو نهائية.',
+      });
+      setTimeout(() => setProcessingCheckFeedback(null), 4000);
+      return;
+    }
+
+    setIsCheckingProcessingOnly(true);
+    setProcessingCheckFeedback(null);
+
+    try {
+      const res = await checkProcessingOrdersOnly(processingOrdersList, {
+        userId: currentUser?.id,
+      });
+
+      if (res.success && res.orders && res.orders.length > 0) {
+        const newStatuses: Record<string, string> = {};
+        for (const ord of res.orders) {
+          const ordId = ord.orderId || ord.id;
+          if (ordId && ord.status) {
+            newStatuses[ordId] = ord.status;
+          }
+        }
+        setCustomUpdatedStatuses((prev) => ({ ...prev, ...newStatuses }));
+
+        setProcessingCheckFeedback({
+          type: 'success',
+          message: `تم فحص ${res.totalChecked} طلب قيد المعالجة: ${res.completedCount || 0} مكتمل، ${res.stillProcessingCount || 0} ما زال قيد المعالجة.`,
+        });
+
+        // Trigger parent refresh to reload from database
+        if (onRefreshOrders) {
+          onRefreshOrders();
+        }
+      } else {
+        setProcessingCheckFeedback({
+          type: res.success ? 'info' : 'error',
+          message: res.message || 'تم فحص الطلبات قيد المعالجة بنجاح.',
+        });
+      }
+    } catch (err: any) {
+      setProcessingCheckFeedback({
+        type: 'error',
+        message: err.message || 'حدث خطأ أثناء فحص الطلبات قيد المعالجة',
+      });
+    } finally {
+      setIsCheckingProcessingOnly(false);
+      setTimeout(() => setProcessingCheckFeedback(null), 6000);
+    }
+  }, [processingOrdersList, currentUser?.id, onRefreshOrders]);
+
+  // Optional background sync on mount if any orders are in processing
+  useEffect(() => {
+    if (processingOrdersList.length > 0) {
+      // Auto check after short delay
+      const timer = setTimeout(() => {
+        handleCheckProcessingOrdersOnly();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, []); // Run once on initial mount
+
+  // Check specific order live status from API (Only if processing)
   const handleCheckOrderLiveStatus = async (orderIdToTrack: string) => {
     const q = orderIdToTrack.trim();
     if (!q) return;
@@ -83,6 +179,7 @@ export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = React.memo(({
           const fetchedStatus = list[0].status || 'completed';
           setCustomUpdatedStatuses((prev) => ({ ...prev, [q]: fetchedStatus }));
           setLiveCheckResult(list[0]);
+          if (onRefreshOrders) onRefreshOrders();
         }
       } else {
         setLiveCheckError(response.error || `تعذر العثور على تحديث للطلب #${q}`);
@@ -201,16 +298,42 @@ export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = React.memo(({
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-center">
+          <div className="flex items-center gap-2 self-start sm:self-center flex-wrap">
+            {/* Primary Action: Check Processing Orders Only */}
+            <button
+              type="button"
+              id="check-processing-orders-btn"
+              onClick={handleCheckProcessingOrdersOnly}
+              disabled={isCheckingProcessingOnly}
+              className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer border ${
+                processingOrdersList.length > 0
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-blue-500 shadow-blue-500/20'
+                  : 'bg-white dark:bg-white/10 hover:bg-slate-100 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800'
+              } disabled:opacity-50`}
+              title="فحص تحديثات الطلبات التي قيد التنفيذ فقط عبر API"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isCheckingProcessingOnly ? 'animate-spin' : ''}`} />
+              <span>
+                {isCheckingProcessingOnly
+                  ? 'جارٍ فحص الطلبات...'
+                  : 'تحقق من الطلبات قيد المعالجة'}
+              </span>
+              {processingOrdersList.length > 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] font-black bg-white text-blue-700 dark:bg-blue-900 dark:text-blue-200 rounded-full font-mono animate-pulse">
+                  {processingOrdersList.length}
+                </span>
+              )}
+            </button>
+
             {onRefreshOrders && (
               <button
                 type="button"
                 id="refresh-orders-list-btn"
                 onClick={onRefreshOrders}
-                className="p-2.5 sm:px-4 sm:py-2.5 rounded-2xl bg-white dark:bg-white/10 hover:bg-slate-100 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 text-xs font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer"
+                className="p-2.5 sm:px-3.5 sm:py-2.5 rounded-2xl bg-white dark:bg-white/10 hover:bg-slate-100 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 text-xs font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer"
                 title="تحديث القائمة من قاعدة البيانات"
               >
-                <RefreshCw className="w-4 h-4 text-[#7F00FF] dark:text-purple-400" />
+                <RefreshCw className="w-3.5 h-3.5 text-[#7F00FF] dark:text-purple-400" />
                 <span className="hidden sm:inline">تحديث السجل</span>
               </button>
             )}
@@ -226,6 +349,37 @@ export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = React.memo(({
             </button>
           </div>
         </div>
+
+        {/* Processing Check Feedback Alert */}
+        {processingCheckFeedback && (
+          <div
+            className={`mt-4 p-3 rounded-2xl border text-xs font-bold flex items-center justify-between gap-3 animate-in fade-in duration-150 ${
+              processingCheckFeedback.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800/60'
+                : processingCheckFeedback.type === 'error'
+                ? 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-200 border-red-200 dark:border-red-800/60'
+                : 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200 border-blue-200 dark:border-blue-800/60'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {processingCheckFeedback.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : processingCheckFeedback.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              ) : (
+                <Clock className="w-4 h-4 text-blue-600 shrink-0" />
+              )}
+              <span>{processingCheckFeedback.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setProcessingCheckFeedback(null)}
+              className="text-slate-400 hover:text-slate-600 text-xs p-1"
+            >
+              ✕
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Guest Notice (If not logged in) */}
@@ -310,19 +464,22 @@ export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = React.memo(({
                   : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
               }`}
             >
-              مكتمل
+              مكتمل ({completedOrdersCount})
             </button>
 
             <button
               type="button"
               onClick={() => setStatusFilter('processing')}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 statusFilter === 'processing'
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50'
               }`}
             >
-              قيد المعالجة
+              <span>قيد المعالجة ({processingOrdersList.length})</span>
+              {processingOrdersList.length > 0 && (
+                <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping" />
+              )}
             </button>
 
             <button
@@ -334,7 +491,7 @@ export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = React.memo(({
                   : 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50'
               }`}
             >
-              مرفوض / ملغي
+              مرفوض / ملغي ({failedOrdersCount})
             </button>
           </div>
 
@@ -441,15 +598,33 @@ export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = React.memo(({
                     تاريخ الطلب: {order.createdAt ? new Date(order.createdAt).toLocaleString('ar-EG') : 'الآن'}
                   </span>
 
-                  <button
-                    type="button"
-                    onClick={() => handleCheckOrderLiveStatus(order.orderId)}
-                    disabled={isRefreshingThis}
-                    className="text-[#7F00FF] dark:text-purple-400 hover:text-[#6b00d6] dark:hover:text-purple-300 font-bold flex items-center gap-1.5 text-xs transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingThis ? 'animate-spin' : ''}`} />
-                    <span>{isRefreshingThis ? 'جارٍ التحقق...' : 'تحديث الحالة من الـ API'}</span>
-                  </button>
+                  {isProcessingStatus(effectiveStatus) ? (
+                    <button
+                      type="button"
+                      onClick={() => handleCheckOrderLiveStatus(order.orderId)}
+                      disabled={isRefreshingThis}
+                      className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/80 font-bold flex items-center gap-1.5 text-xs transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingThis ? 'animate-spin' : ''}`} />
+                      <span>{isRefreshingThis ? 'جارٍ التحقق...' : 'تحقق من حالة الطلب الآن'}</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1 text-[11px]">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>مكتمل ومسلّم</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleCheckOrderLiveStatus(order.orderId)}
+                        disabled={isRefreshingThis}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-[10px] flex items-center gap-1 transition-colors cursor-pointer"
+                        title="إعادة الاستعلام"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isRefreshingThis ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             );

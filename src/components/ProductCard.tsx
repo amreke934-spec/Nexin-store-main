@@ -3,6 +3,7 @@ import { Zap, ShoppingCart, ArrowLeft, Wallet } from 'lucide-react';
 import { Product } from '../types';
 import { getProductServiceType } from '../utils/productUtils';
 import { getProductDisplayPrice } from '../utils/currencyUtils';
+import { useProfitMargin } from '../utils/profitUtils';
 
 interface ProductCardProps {
   product: Product;
@@ -10,6 +11,9 @@ interface ProductCardProps {
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect }) => {
+  // Subscribe to profit margin updates in real-time
+  useProfitMargin();
+
   const serviceType = getProductServiceType(product);
   const isCash = serviceType === 'cash' || product.isCash;
 
@@ -28,8 +32,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect }) =
       )}
 
       <div>
-        {/* Product Image & Tag */}
-        <div className="relative w-full h-24 sm:h-28 md:h-36 rounded-lg sm:rounded-xl overflow-hidden bg-gray-50 dark:bg-black/30 mb-2 sm:mb-3 border border-gray-100 dark:border-white/10 flex items-center justify-center">
+        {/* Product Image & Tag (enlarged by ~20%) */}
+        <div className="relative w-full h-28 sm:h-34 md:h-44 rounded-lg sm:rounded-xl overflow-hidden bg-gray-50 dark:bg-black/30 mb-2 sm:mb-3 border border-gray-100 dark:border-white/10 flex items-center justify-center">
           <img
             src={product.image}
             alt={product.name}

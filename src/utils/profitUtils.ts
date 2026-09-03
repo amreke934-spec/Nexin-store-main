@@ -14,6 +14,8 @@ export interface ProfitMarginConfig {
 
 const STORAGE_KEY_PROFIT_MARGIN = 'nexen_store_profit_margin_config';
 
+let memoryProfitMarginConfig: ProfitMarginConfig | null = null;
+
 export const DEFAULT_PROFIT_MARGIN_CONFIG: ProfitMarginConfig = {
   percentage: 10,
   fixedMarginUsd: 0,
@@ -21,18 +23,23 @@ export const DEFAULT_PROFIT_MARGIN_CONFIG: ProfitMarginConfig = {
 };
 
 /**
- * Get current profit margin configuration from localStorage or default
+ * Get current profit margin configuration from memory, localStorage or default
  */
 export function getProfitMarginConfig(): ProfitMarginConfig {
+  if (memoryProfitMarginConfig) {
+    return memoryProfitMarginConfig;
+  }
   try {
     const saved = localStorage.getItem(STORAGE_KEY_PROFIT_MARGIN);
     if (saved) {
       const parsed = JSON.parse(saved);
-      return {
+      const conf: ProfitMarginConfig = {
         percentage: typeof parsed.percentage === 'number' ? Math.max(0, parsed.percentage) : DEFAULT_PROFIT_MARGIN_CONFIG.percentage,
         fixedMarginUsd: typeof parsed.fixedMarginUsd === 'number' ? Math.max(0, parsed.fixedMarginUsd) : DEFAULT_PROFIT_MARGIN_CONFIG.fixedMarginUsd,
         enabled: parsed.enabled !== false,
       };
+      memoryProfitMarginConfig = conf;
+      return conf;
     }
   } catch {
     // fallback
@@ -41,15 +48,73 @@ export function getProfitMarginConfig(): ProfitMarginConfig {
 }
 
 /**
- * Save profit margin config locally and dispatch change event for real-time reactivity
+ * Save profit margin config locally and dispatch change event for immediate real-time reactivity
  */
 export function setProfitMarginConfig(config: ProfitMarginConfig): void {
   try {
+    memoryProfitMarginConfig = config;
     localStorage.setItem(STORAGE_KEY_PROFIT_MARGIN, JSON.stringify(config));
     window.dispatchEvent(new CustomEvent('nexen-profit-margin-changed', { detail: config }));
   } catch (e) {
     console.warn('Could not save profit margin to localStorage:', e);
   }
+}
+
+/**
+ * Apply profit margin immediately and synchronize to server
+ */
+export async function applyProfitMarginDirectly(
+  percentage: number,
+  fixedUsd: number = 0,
+  enabled: boolean = true
+): Promise<ProfitMarginConfig> {
+  const cleanPercentage = Math.max(0, Number(percentage) || 0);
+  const cleanFixed = Math.max(0, Number(fixedUsd) || 0);
+  const newConfig: ProfitMarginConfig = {
+    percentage: cleanPercentage,
+    fixedMarginUsd: cleanFixed,
+    enabled: enabled,
+  };
+
+  // Immediate in-memory & localStorage update
+  setProfitMarginConfig(newConfig);
+
+  // Sync with DB
+  try {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'profit_margin', value: newConfig }),
+    });
+  } catch (err) {
+    console.warn('Failed to sync profit margin with database:', err);
+  }
+
+  return newConfig;
+}
+
+/**
+ * Fetch profit margin config from database if available
+ */
+export async function fetchProfitMarginFromServer(): Promise<ProfitMarginConfig> {
+  try {
+    const res = await fetch('/api/settings/profit_margin');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.value && typeof data.value.percentage === 'number') {
+        const serverConfig: ProfitMarginConfig = {
+          percentage: Math.max(0, data.value.percentage),
+          fixedMarginUsd: Math.max(0, data.value.fixedMarginUsd || 0),
+          enabled: data.value.enabled !== false,
+        };
+        setProfitMarginConfig(serverConfig);
+        return serverConfig;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return getProfitMarginConfig();
 }
 
 /**

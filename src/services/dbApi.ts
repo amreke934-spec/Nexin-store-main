@@ -1,4 +1,4 @@
-import { CustomerUser, OrderItem } from '../types';
+import { CustomerUser, OrderItem, DepositMethod, DepositRequest } from '../types';
 
 export interface DbStatusResponse {
   connected: boolean;
@@ -110,6 +110,20 @@ export async function savePlayerIdToDb(userId: string, category: string, playerI
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Fetch fresh user profile (including current balance) from DB
+ */
+export async function fetchUserProfile(idOrEmail: string): Promise<CustomerUser | null> {
+  try {
+    const res = await fetch(`/api/users/profile/${encodeURIComponent(idOrEmail)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.user || null;
+  } catch {
+    return null;
   }
 }
 
@@ -374,6 +388,145 @@ export async function syncProcessingOrdersInDb(options?: {
       message: err.message || 'فشل الاتصال بخدمة التحقق من الطلبات',
       error: err.message,
     };
+  }
+}
+
+// ==========================================
+// DEPOSIT METHODS & REQUESTS API CLIENT
+// ==========================================
+
+/**
+ * Fetch all available deposit methods
+ */
+export async function fetchDepositMethods(): Promise<DepositMethod[]> {
+  try {
+    const res = await fetch('/api/deposit-methods');
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.methods || [];
+  } catch (err) {
+    console.error('Failed to fetch deposit methods:', err);
+    return [];
+  }
+}
+
+/**
+ * Save all deposit methods (array)
+ */
+export async function saveDepositMethods(methods: DepositMethod[]): Promise<{ success: boolean; methods?: DepositMethod[]; error?: string }> {
+  try {
+    const res = await fetch('/api/deposit-methods', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ methods }),
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل حفظ طرق الإيداع' };
+  }
+}
+
+/**
+ * Save or update single deposit method
+ */
+export async function saveDepositMethod(method: Partial<DepositMethod>): Promise<{ success: boolean; methods?: DepositMethod[]; error?: string }> {
+  try {
+    const res = await fetch('/api/deposit-methods', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method }),
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل حفظ طريقة الإيداع' };
+  }
+}
+
+/**
+ * Delete a deposit method by ID
+ */
+export async function deleteDepositMethod(id: string): Promise<{ success: boolean; methods?: DepositMethod[]; error?: string }> {
+  try {
+    const res = await fetch(`/api/deposit-methods/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل حذف طريقة الإيداع' };
+  }
+}
+
+/**
+ * Fetch deposit requests (all for admin, or for a specific user)
+ */
+export async function fetchDepositRequests(userId?: string, status?: string): Promise<DepositRequest[]> {
+  try {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (status) params.append('status', status);
+
+    const url = `/api/deposit-requests${params.toString() ? `?${params.toString()}` : ''}`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.requests || [];
+  } catch (err) {
+    console.error('Failed to fetch deposit requests:', err);
+    return [];
+  }
+}
+
+/**
+ * Submit a new deposit request by a registered user
+ */
+export async function submitDepositRequest(payload: {
+  userId: string;
+  methodId: string;
+  amount: number;
+  txNumber: string;
+  notes?: string;
+}): Promise<{ success: boolean; request?: DepositRequest; error?: string }> {
+  try {
+    const res = await fetch('/api/deposit-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'فشل إرسال طلب الإيداع' };
+    }
+    return data;
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل الاتصال بالخادم' };
+  }
+}
+
+/**
+ * Admin: Update deposit request status (Approve & Credit Balance, or Reject)
+ */
+export async function updateDepositRequestStatus(
+  id: string,
+  status: 'approved' | 'rejected' | 'pending',
+  rejectionReason?: string,
+  adminEmail?: string
+): Promise<{ success: boolean; request?: DepositRequest; message?: string; error?: string }> {
+  try {
+    const res = await fetch(`/api/deposit-requests/${encodeURIComponent(id)}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, rejectionReason, adminEmail }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'فشل تحديث حالة الطلب' };
+    }
+    return data;
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل الاتصال بالخادم' };
   }
 }
 

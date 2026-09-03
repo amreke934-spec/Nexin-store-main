@@ -29,6 +29,9 @@ import {
   Plus,
   Minus,
   Image as ImageIcon,
+  ShieldCheck,
+  Mail,
+  BadgeCheck,
 } from 'lucide-react';
 import { CustomerUser, MerchantInfo, OrderItem } from '../types';
 import {
@@ -49,9 +52,19 @@ import {
   setProfitMarginConfig,
   ProfitMarginConfig,
   calculateRetailPrice,
+  applyProfitMarginDirectly,
+  fetchProfitMarginFromServer,
 } from '../utils/profitUtils';
 import { formatPriceSyp, getExchangeRate, convertToSyp, formatSypNumber } from '../utils/currencyUtils';
-import { getScApiKeyStatus, updateScApiKey } from '../services/scStoreApi';
+import {
+  getScApiKeyStatus,
+  updateScApiKey,
+  getScSyncSettings,
+  saveScSyncSettings,
+  triggerScSyncNow,
+  SyncSettingsData,
+} from '../services/scStoreApi';
+import { AdminDepositsTab } from './admin/AdminDepositsTab';
 
 interface AdminDashboardProps {
   currentUser: CustomerUser | null;
@@ -61,6 +74,7 @@ interface AdminDashboardProps {
   onNavigateHome: () => void;
   onNavigateSettings: () => void;
   onOpenBannerManager?: () => void;
+  onRefreshProducts?: () => void;
 }
 
 export const ADMIN_AUTHORIZED_EMAIL = 'm74321176@gmail.com';
@@ -73,9 +87,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
   onNavigateHome,
   onNavigateSettings,
   onOpenBannerManager,
+  onRefreshProducts,
 }) => {
   // Active Tab inside Admin Panel
-  const [activeAdminTab, setActiveAdminTab] = useState<'stats' | 'users' | 'merchant' | 'profit' | 'order_check'>('stats');
+  const [activeAdminTab, setActiveAdminTab] = useState<'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits'>('stats');
 
   // Stats State
   const [stats, setStats] = useState<AdminStatsData | null>(null);
@@ -138,6 +153,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
   const [apiKeyFeedback, setApiKeyFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showApiKeyInput, setShowApiKeyInput] = useState<boolean>(false);
 
+  // SC Store Product & Price Sync State
+  const [syncSettings, setSyncSettings] = useState<SyncSettingsData | null>(null);
+  const [syncIntervalInput, setSyncIntervalInput] = useState<string>('60');
+  const [autoSyncEnabledInput, setAutoSyncEnabledInput] = useState<boolean>(true);
+  const [isLoadingSyncSettings, setIsLoadingSyncSettings] = useState<boolean>(false);
+  const [isTriggeringSyncNow, setIsTriggeringSyncNow] = useState<boolean>(false);
+  const [isSavingSyncSettings, setIsSavingSyncSettings] = useState<boolean>(false);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+    stats?: { total: number; games: number; apps: number; cards: number; telecom: number; cash: number };
+  } | null>(null);
+
   // UI state
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
@@ -155,6 +183,108 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
       setApiKeyStatus(st);
     } catch {}
   }, []);
+
+  // Load Sync Settings
+  const loadSyncSettings = useCallback(async () => {
+    setIsLoadingSyncSettings(true);
+    try {
+      const data = await getScSyncSettings();
+      setSyncSettings(data);
+      setSyncIntervalInput(String(data.intervalMinutes || 60));
+      setAutoSyncEnabledInput(data.autoSyncEnabled);
+    } catch (err) {
+      console.error('Failed to load sync settings:', err);
+    } finally {
+      setIsLoadingSyncSettings(false);
+    }
+  }, []);
+
+  // Save Sync Interval & Toggle
+  const handleSaveSyncSettings = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const parsedMinutes = parseInt(syncIntervalInput.trim(), 10);
+    if (isNaN(parsedMinutes) || parsedMinutes < 1 || parsedMinutes > 10080) {
+      setSyncFeedback({
+        type: 'error',
+        text: 'يرجى إدخال زمن مزامنة صحيح بالدقائق (رقم بين 1 دقيقة و 10080 دقيقة).',
+      });
+      return;
+    }
+
+    setIsSavingSyncSettings(true);
+    setSyncFeedback(null);
+    try {
+      const res = await saveScSyncSettings({
+        intervalMinutes: parsedMinutes,
+        autoSyncEnabled: autoSyncEnabledInput,
+      });
+
+      if (res.success) {
+        if (res.settings) {
+          setSyncSettings(res.settings);
+        }
+        setSyncFeedback({
+          type: 'success',
+          text: res.message || `تم حفظ زمن المزامنة بنجاح (كل ${parsedMinutes} دقيقة)!`,
+        });
+      } else {
+        setSyncFeedback({
+          type: 'error',
+          text: res.message || 'تعذر حفظ إعدادات زمن المزامنة، يرجى المحاولة مرة أخرى.',
+        });
+      }
+    } catch (err: any) {
+      setSyncFeedback({
+        type: 'error',
+        text: err.message || 'حدث خطأ أثناء حفظ الإعدادات.',
+      });
+    } finally {
+      setIsSavingSyncSettings(false);
+    }
+  };
+
+  // Immediate Sync Now Handler
+  const handleTriggerSyncNow = async () => {
+    setIsTriggeringSyncNow(true);
+    setSyncFeedback(null);
+    try {
+      const res = await triggerScSyncNow();
+      if (res.success) {
+        if (res.settings) {
+          setSyncSettings(res.settings);
+        } else {
+          loadSyncSettings();
+        }
+        setSyncFeedback({
+          type: 'success',
+          text: res.message || 'تمت مزامنة المنتجات وتحديث الأسعار بنجاح!',
+          stats: res.stats,
+        });
+
+        // Notify app and storefront of newly synced products & prices
+        window.dispatchEvent(new CustomEvent('nexen-products-synced'));
+        if (onRefreshProducts) {
+          onRefreshProducts();
+        }
+        if (onRefreshMerchant) {
+          onRefreshMerchant();
+        }
+        loadStats();
+      } else {
+        setSyncFeedback({
+          type: 'error',
+          text: res.message || 'تعذر تنفيذ المزامنة من المورد حالياً، يرجى التحقق من الاتصال ومفتاح API.',
+        });
+      }
+    } catch (err: any) {
+      setSyncFeedback({
+        type: 'error',
+        text: err.message || 'حدث خطأ غير متوقع أثناء محاولة المزامنة الفورية.',
+      });
+    } finally {
+      setIsTriggeringSyncNow(false);
+    }
+  };
 
   // Save / Update SC Store API Key with Live Verification
   const handleSaveApiKey = async (e?: React.FormEvent) => {
@@ -225,7 +355,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
     loadStats();
     loadUsers();
     loadApiKeyStatus();
-  }, [loadStats, loadUsers, loadApiKeyStatus]);
+    loadSyncSettings();
+
+    // Fetch live profit margin configuration from database
+    fetchProfitMarginFromServer().then((remoteConfig) => {
+      if (remoteConfig) {
+        setProfitConfig(remoteConfig);
+        setProfitPercentageInput(String(remoteConfig.percentage));
+        setProfitFixedInput(String(remoteConfig.fixedMarginUsd));
+      }
+    });
+  }, [loadStats, loadUsers, loadApiKeyStatus, loadSyncSettings]);
 
   // Open Edit User Modal
   const handleOpenEditUser = (user: AdminUserData) => {
@@ -316,38 +456,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
     }
   };
 
-  // Save Profit Margin Settings
+  // Save Profit Margin Settings (Immediate, Direct, and Database-Synced)
   const handleSaveProfitMargin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     const percent = Math.max(0, parseFloat(profitPercentageInput) || 0);
     const fixed = Math.max(0, parseFloat(profitFixedInput) || 0);
 
-    const newConfig: ProfitMarginConfig = {
-      percentage: percent,
-      fixedMarginUsd: fixed,
-      enabled: profitConfig.enabled,
-    };
-
-    setProfitConfig(newConfig);
-    setProfitMarginConfig(newConfig);
-
-    // Save to Neon DB
-    await saveStoreSetting('profit_margin', newConfig).catch(() => {});
+    const savedConfig = await applyProfitMarginDirectly(percent, fixed, true);
+    setProfitConfig(savedConfig);
 
     setIsProfitSaved(true);
     setTimeout(() => setIsProfitSaved(false), 3000);
   };
 
+  // Immediate Quick Preset (+5%, +10%, etc.)
+  const handleQuickPreset = async (percent: number) => {
+    setProfitPercentageInput(String(percent));
+    const fixed = Math.max(0, parseFloat(profitFixedInput) || 0);
+    const savedConfig = await applyProfitMarginDirectly(percent, fixed, true);
+    setProfitConfig(savedConfig);
+    setIsProfitSaved(true);
+    setTimeout(() => setIsProfitSaved(false), 2500);
+  };
+
+  // Immediate Percentage Input change
+  const handlePercentageChange = (val: string) => {
+    setProfitPercentageInput(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && num >= 0) {
+      applyProfitMarginDirectly(num, Math.max(0, parseFloat(profitFixedInput) || 0), true).then((saved) => {
+        setProfitConfig(saved);
+      });
+    }
+  };
+
+  // Immediate Fixed Margin Input change
+  const handleFixedMarginChange = (val: string) => {
+    setProfitFixedInput(val);
+    const fixedNum = parseFloat(val);
+    if (!isNaN(fixedNum) && fixedNum >= 0) {
+      applyProfitMarginDirectly(Math.max(0, parseFloat(profitPercentageInput) || 0), fixedNum, true).then((saved) => {
+        setProfitConfig(saved);
+      });
+    }
+  };
+
   // Toggle profit margin enabled
-  const handleToggleProfitEnabled = () => {
-    const newConfig: ProfitMarginConfig = {
-      ...profitConfig,
-      enabled: !profitConfig.enabled,
-    };
-    setProfitConfig(newConfig);
-    setProfitMarginConfig(newConfig);
-    saveStoreSetting('profit_margin', newConfig).catch(() => {});
+  const handleToggleProfitEnabled = async () => {
+    const newEnabled = !profitConfig.enabled;
+    const percent = Math.max(0, parseFloat(profitPercentageInput) || 0);
+    const fixed = Math.max(0, parseFloat(profitFixedInput) || 0);
+    const savedConfig = await applyProfitMarginDirectly(percent, fixed, newEnabled);
+    setProfitConfig(savedConfig);
     setIsProfitSaved(true);
     setTimeout(() => setIsProfitSaved(false), 3000);
   };
@@ -543,6 +704,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
         >
           <Search className="w-4 h-4" />
           <span>التحقق من حالة طلب</span>
+        </button>
+
+        <button
+          id="tab-btn-sync-settings"
+          type="button"
+          onClick={() => setActiveAdminTab('sync_settings')}
+          className={`flex items-center gap-2 py-3 px-5 rounded-2xl text-xs sm:text-sm font-bold transition-all duration-200 whitespace-nowrap cursor-pointer ${
+            activeAdminTab === 'sync_settings'
+              ? 'bg-[#7F00FF] text-white shadow-md shadow-[#7F00FF]/25 scale-[1.02]'
+              : 'bg-white dark:bg-[#151221] text-slate-700 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-purple-950/30 border border-slate-200/80 dark:border-white/10'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          <span>إعدادات المزامنة {syncSettings?.intervalMinutes ? `(كل ${syncSettings.intervalMinutes} دقيقة)` : ''}</span>
+        </button>
+
+        <button
+          id="tab-btn-deposits"
+          type="button"
+          onClick={() => setActiveAdminTab('deposits')}
+          className={`flex items-center gap-2 py-3 px-5 rounded-2xl text-xs sm:text-sm font-bold transition-all duration-200 whitespace-nowrap cursor-pointer ${
+            activeAdminTab === 'deposits'
+              ? 'bg-[#7F00FF] text-white shadow-md shadow-[#7F00FF]/25 scale-[1.02]'
+              : 'bg-white dark:bg-[#151221] text-slate-700 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-purple-950/30 border border-slate-200/80 dark:border-white/10'
+          }`}
+        >
+          <Wallet className="w-4 h-4" />
+          <span>طلبات وطرق الإيداع 💰</span>
         </button>
 
         {onOpenBannerManager && (
@@ -925,17 +1114,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
       {activeAdminTab === 'merchant' && (
         <div className="space-y-6">
           <div className="bg-white dark:bg-[#151221] border border-gray-200/80 dark:border-white/10 rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
-            <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center justify-between flex-wrap gap-4 pb-2 border-b border-gray-100 dark:border-white/5">
               <div className="flex items-center gap-3.5">
                 <div className="w-12 h-12 rounded-2xl bg-purple-100 dark:bg-purple-950 text-[#7F00FF] dark:text-purple-300 flex items-center justify-center">
                   <Building className="w-6 h-6" />
                 </div>
                 <div>
                   <h3 className="text-lg font-black text-slate-900 dark:text-white">
-                    بيانات حساب التاجر (SC Store API)
+                    بيانات الحساب التجاري (SC Store)
                   </h3>
                   <p className="text-xs text-slate-400">
-                    الحساب المتصل بالخادم المزود لتنفيذ الطلبات والشحن التلقائي
+                    البيانات الفعلية المجلوبة مباشرة من API الحساب المزود
                   </p>
                 </div>
               </div>
@@ -947,180 +1136,111 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                 className="px-4 py-2.5 rounded-xl bg-[#7F00FF] hover:bg-[#6b00d6] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoadingMerchant ? 'animate-spin' : ''}`} />
-                <span>تحديث الرصيد الآن</span>
+                <span>تحديث البيانات الآن</span>
               </button>
             </div>
 
-            {/* Merchant Details Cards Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
-              {/* Account Balance */}
-              <div className="p-5 rounded-2xl bg-gradient-to-br from-purple-50 to-purple-100/60 dark:from-purple-950/40 dark:to-purple-900/20 border border-purple-200/80 dark:border-purple-800/50">
-                <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 block mb-1">
-                  رصيد الحساب التجاري المتاح
-                </span>
-                <span className="text-2xl sm:text-3xl font-black text-[#7F00FF] dark:text-purple-200 font-mono block">
-                  {formatSypNumber(convertToSyp(merchantInfo?.balance ?? 0, 'USD', exchangeRate, false))} ل.س
-                </span>
-                <span className="text-xs text-slate-500 dark:text-slate-400 mt-1 block">
-                  رصيد الشحن الآلي المباشر
-                </span>
-              </div>
-
-              {/* Account Username / Name */}
-              <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800">
-                <span className="text-[11px] font-bold text-slate-400 block mb-1">اسم الحساب / التاجر</span>
-                <span className="text-lg font-black text-slate-900 dark:text-white block truncate">
-                  {merchantInfo?.name || merchantInfo?.username || 'SC Store Merchant'}
-                </span>
-                <span className="text-[11px] text-slate-500 font-mono mt-1 block">
-                  المعرف: #{merchantInfo?.id || '2456'}
-                </span>
-              </div>
-
-              {/* Status & Gateway */}
-              <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800">
-                <span className="text-[11px] font-bold text-slate-400 block mb-1">حالة الاتصال بالـ API</span>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">
-                    متصل ونشط (SC Store v1)
-                  </span>
-                </div>
-                <span className="text-[10px] text-slate-400 mt-1 block">
-                  آخر فحص: {merchantInfo?.lastUpdated || 'الآن'}
-                </span>
-              </div>
-            </div>
-
-            {/* SC Store API Key Manager Card */}
-            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 text-white space-y-5">
-              <div className="flex items-start justify-between flex-wrap gap-4">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-11 h-11 rounded-2xl bg-purple-900/70 border border-purple-500/30 text-purple-300 flex items-center justify-center shrink-0">
-                    <Key className="w-5 h-5" />
+            {/* The Single Merchant Card requested by the user */}
+            <div className="p-6 sm:p-8 rounded-3xl bg-slate-50 dark:bg-[#1a162b] border border-slate-200/80 dark:border-purple-900/40 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
+                {/* 1. اسم حسابك التجاري (من name) */}
+                <div className="p-5 rounded-2xl bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 shadow-xs flex items-start gap-4">
+                  <div className="w-11 h-11 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-[#7F00FF] dark:text-purple-300 flex items-center justify-center shrink-0 mt-0.5">
+                    <Building className="w-5 h-5" />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="text-sm font-bold text-white">إدارة وتحديث مفتاح الربط البرمجي (X-Api-Key)</h4>
-                      {apiKeyStatus?.hasCustomKey ? (
-                        <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" />
-                          مفتاح مخصص ونشط بقاعدة البيانات
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      اسم حسابك التجاري:
+                    </span>
+                    <span className="text-base sm:text-lg font-black text-slate-900 dark:text-white block truncate">
+                      {merchantInfo?.name || 'اسم المستخدم التجريبي'}
+                    </span>
+                    {merchantInfo?.email && (
+                      <span className="text-[11px] text-slate-400 dark:text-slate-500 block truncate mt-0.5" dir="ltr">
+                        {merchantInfo.email}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. رصيد حسابك SYP ليرة سورية (من Balance) */}
+                <div className="p-5 rounded-2xl bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-950/40 dark:to-purple-900/20 border border-purple-200/80 dark:border-purple-800/40 shadow-xs flex items-start gap-4">
+                  <div className="w-11 h-11 rounded-xl bg-[#7F00FF] text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm shadow-[#7F00FF]/30">
+                    <Coins className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-bold text-purple-700 dark:text-purple-300 block mb-1">
+                      رصيد حسابك SYP ليرة سورية:
+                    </span>
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
+                      <span className="text-2xl sm:text-3xl font-black text-[#7F00FF] dark:text-purple-200 font-mono">
+                        {formatSypNumber(merchantInfo?.balance ?? 0)}
+                      </span>
+                      <span className="text-sm font-bold text-purple-700 dark:text-purple-300">ل.س</span>
+                    </div>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 block">
+                      الرصيد المتاح للطلبات والشحن التلقائي
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. حالة توثيق بريدك لدى sc-store (من emailVerified) */}
+                <div className="p-5 rounded-2xl bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 shadow-xs flex items-start gap-4">
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                    merchantInfo?.emailVerified !== false
+                      ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400'
+                  }`}>
+                    <Mail className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      حالة توثيق بريدك لدى sc-store:
+                    </span>
+                    <div className="flex items-center gap-2 mt-1">
+                      {merchantInfo?.emailVerified !== false ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          موثق بنجاح لدى SC Store
                         </span>
                       ) : (
-                        <span className="text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full">
-                          المفتاح الافتراضي للمتجر
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-300/80 dark:border-amber-800">
+                          <AlertCircle className="w-3.5 h-3.5" />
+                          غير موثق لدى SC Store
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      يتم تخزين المفتاح بشكل آمن على الخادم وقاعدة البيانات، مع التحقق المباشر من صلاحيته لدى SC Store
-                    </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <div className="px-3.5 py-1.5 bg-slate-800/90 rounded-xl text-xs font-mono text-purple-300 border border-slate-700/80 flex items-center gap-2">
-                    <span>{apiKeyStatus?.maskedKey || 'sc_xIfr••••••••••••••••••••••••Kag2'}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(apiKeyStatus?.maskedKey || '', 'مفتاح API')}
-                      className="text-slate-400 hover:text-white transition-colors cursor-pointer"
-                      title="نسخ"
-                    >
-                      {copiedText === 'مفتاح API' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    </button>
+                {/* 4. حالة توثيق هويتك لدى sc-store (من identityVerified) */}
+                <div className="p-5 rounded-2xl bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 shadow-xs flex items-start gap-4">
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                    merchantInfo?.identityVerified !== false
+                      ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400'
+                  }`}>
+                    <ShieldCheck className="w-5 h-5" />
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowApiKeyInput(!showApiKeyInput);
-                      setApiKeyFeedback(null);
-                    }}
-                    className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                    <span>{showApiKeyInput ? 'إلغاء' : 'تغيير المفتاح'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Feedback Message */}
-              {apiKeyFeedback && (
-                <div
-                  className={`p-3.5 rounded-2xl text-xs font-medium flex items-center gap-2.5 animate-in fade-in ${
-                    apiKeyFeedback.type === 'success'
-                      ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
-                      : 'bg-red-500/15 border border-red-500/30 text-red-300'
-                  }`}
-                >
-                  {apiKeyFeedback.type === 'success' ? (
-                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-                  )}
-                  <span>{apiKeyFeedback.text}</span>
-                </div>
-              )}
-
-              {/* Expandable Key Input Form */}
-              {showApiKeyInput && (
-                <form onSubmit={handleSaveApiKey} className="pt-2 border-t border-slate-800 space-y-4 animate-in fade-in">
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-200">
-                      أدخل مفتاح API الجديد (يبدأ بـ <span className="font-mono text-purple-300">sc_</span>)
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={inputApiKey}
-                        onChange={(e) => setInputApiKey(e.target.value)}
-                        placeholder="مثال: sc_6uT••••••••••••••••••••042x"
-                        dir="ltr"
-                        className="w-full px-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs sm:text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-[#7F00FF] focus:ring-2 focus:ring-[#7F00FF]/30 transition-all text-left"
-                      />
-                    </div>
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      انسخ المفتاح بالكامل من حسابك في موقع SC Store (توثيق واجهة الربط البرمجي). سيتم إجراء فحص فوري ومصادقة مع الخادم المزود لتأكيد صحة المفتاح قبل حفظه في قاعدة البيانات.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="submit"
-                      disabled={isUpdatingApiKey || !inputApiKey.trim()}
-                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#7F00FF] to-[#6b00d6] hover:from-[#6b00d6] hover:to-[#5500aa] text-white text-xs font-black transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                    >
-                      {isUpdatingApiKey ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>جاري التحقق والمصادقة...</span>
-                        </>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      حالة توثيق هويتك لدى sc-store:
+                    </span>
+                    <div className="flex items-center gap-2 mt-1">
+                      {merchantInfo?.identityVerified !== false ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800">
+                          <BadgeCheck className="w-3.5 h-3.5" />
+                          الهوية موثقة ومعتمدة لدى SC Store
+                        </span>
                       ) : (
-                        <>
-                          <Check className="w-3.5 h-3.5" />
-                          <span>التحقق والحفظ المباشر</span>
-                        </>
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-300/80 dark:border-amber-800">
+                          <AlertCircle className="w-3.5 h-3.5" />
+                          الهوية غير موثقة لدى SC Store
+                        </span>
                       )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowApiKeyInput(false)}
-                      className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
-                    >
-                      إلغاء
-                    </button>
+                    </div>
                   </div>
-                </form>
-              )}
-
-              {/* Status Note on 403 Graceful Handling */}
-              <div className="p-3 bg-purple-950/40 border border-purple-900/60 rounded-2xl flex items-center gap-2.5 text-[11px] text-purple-200">
-                <AlertCircle className="w-4 h-4 text-purple-400 shrink-0" />
-                <span>
-                  نظام حماية الاستمرارية: في حال تأخر أو حظر المفتاح (كود 403)، يقوم المتجر تلقائياً بعرض قائمة المنتجات مع صورها (image_url) لضمان عدم توقف عمليات الشراء والتصفح.
-                </span>
+                </div>
               </div>
             </div>
           </div>
@@ -1137,10 +1257,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
               </div>
               <div>
                 <h3 className="text-lg font-black text-slate-900 dark:text-white">
-                  إضافة وضبط نسبة الربح الشاملة
+                  إضافة وضبط نسبة الربح الشاملة (تطبيق فوري ومباشر)
                 </h3>
                 <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-xl">
-                  تتيح لك هذه الميزة وضع نسبة مئوية (هامش ربح) على أسعار الجملة القادمة من SC Store، ليتم تطبيقها وحسابها تلقائياً على كافة المنتجات وبطاقات الشحن لزبائن المتجر.
+                  يتم تطبيق وحساب نسبة الربح فوراً وبشكل لحظي ومباشر على كافة المنتجات وبطاقات الشحن لزبائن المتجر وتخزينها في قاعدة البيانات.
                 </p>
               </div>
             </div>
@@ -1156,7 +1276,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
               }`}
             >
               <span className={`w-2 h-2 rounded-full ${profitConfig.enabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-              <span>{profitConfig.enabled ? 'نسبة الربح: مفعلة' : 'نسبة الربح: معطلة'}</span>
+              <span>{profitConfig.enabled ? 'نسبة الربح: مفعلة وتعمل فوراً' : 'نسبة الربح: معطلة'}</span>
             </button>
           </div>
 
@@ -1175,7 +1295,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                     max="500"
                     step="0.5"
                     value={profitPercentageInput}
-                    onChange={(e) => setProfitPercentageInput(e.target.value)}
+                    onChange={(e) => handlePercentageChange(e.target.value)}
                     className="w-full pl-10 pr-8 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-[#7F00FF]"
                     placeholder="مثال: 10"
                   />
@@ -1184,14 +1304,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
 
                 {/* Quick Presets */}
                 <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                  <span className="text-[10px] text-slate-400 font-medium ml-1">خيارات سريعة:</span>
-                  {[5, 10, 15, 20, 25].map((pct) => (
+                  <span className="text-[10px] text-slate-400 font-medium ml-1">خيارات سريعة (تطبيق فوري):</span>
+                  {[0, 5, 10, 15, 20, 25].map((pct) => (
                     <button
                       key={pct}
                       type="button"
-                      onClick={() => {
-                        setProfitPercentageInput(String(pct));
-                      }}
+                      onClick={() => handleQuickPreset(pct)}
                       className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
                         profitPercentageInput === String(pct)
                           ? 'bg-[#7F00FF] text-white'
@@ -1216,7 +1334,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                     min="0"
                     step="0.05"
                     value={profitFixedInput}
-                    onChange={(e) => setProfitFixedInput(e.target.value)}
+                    onChange={(e) => handleFixedMarginChange(e.target.value)}
                     className="w-full pl-10 pr-8 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-[#7F00FF]"
                     placeholder="مثال: 0.20"
                   />
@@ -1245,13 +1363,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
 
                 <div className="p-3.5 bg-purple-100/80 dark:bg-purple-900/50 rounded-xl border border-purple-200 dark:border-purple-700/50">
                   <span className="text-[10px] text-purple-700 dark:text-purple-300 block font-bold">
-                    سعر البيع النهائي في المتجر (+{profitPercentageInput || 0}%)
+                    سعر البيع النهائي في المتجر ({profitConfig.enabled ? `+${profitPercentageInput || 0}%` : 'الربح معطل'})
                   </span>
                   <span className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 font-mono">
-                    {formatPriceSyp(10, 'USD', {
-                      customRate: exchangeRate,
-                      applyMargin: profitConfig.enabled,
-                    })}
+                    {formatSypNumber(
+                      Math.round(
+                        (profitConfig.enabled
+                          ? (10 * (1 + (parseFloat(profitPercentageInput) || 0) / 100)) + (parseFloat(profitFixedInput) || 0)
+                          : 10) * exchangeRate
+                      )
+                    )} ل.س
                   </span>
                 </div>
               </div>
@@ -1264,13 +1385,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                 className="px-6 py-3 bg-[#7F00FF] hover:bg-[#6b00d6] active:scale-98 text-white text-xs sm:text-sm font-bold rounded-2xl transition-all shadow-md shadow-[#7F00FF]/25 flex items-center gap-2 cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>حفظ وتطبيق نسبة الربح على المتجر فوراً</span>
+                <span>حفظ وتطبيق نسبة الربح فوراً ومباشرة</span>
               </button>
 
               {isProfitSaved && (
                 <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-bold animate-in fade-in">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>تم حفظ وتحديث نسبة الربح بنجاح ومزامنتها في قاعدة البيانات!</span>
+                  <span>تم تطبيق نسبة الربح فوراً وتحديث الأسعار في كامل المتجر وقاعدة البيانات!</span>
                 </div>
               )}
             </div>
@@ -1467,6 +1588,350 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
             </div>
           )}
         </div>
+      )}
+
+      {/* 7.5. TAB CONTENT 6: SYNC SETTINGS & CONTROLS */}
+      {activeAdminTab === 'sync_settings' && (
+        <div id="admin-sync-settings-section" className="space-y-6 animate-in fade-in duration-300">
+          {/* Header Banner Card */}
+          <div className="bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-purple-500/25">
+                <Clock className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
+                    إعدادات مزامنة المنتجات والأسعار من المورد
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 dark:bg-purple-950/60 text-[#7F00FF] dark:text-purple-300 border border-purple-200 dark:border-purple-800/50">
+                    SC Store API Sync
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-2xl leading-relaxed">
+                  تحكم بجدولة الفحص والتحديث التلقائي لكافة باقات الألعاب والتطبيقات والبطاقات والاتصالات من المورد، وتطبيق أحدث الأسعار والتغيرات تلقائياً.
+                </p>
+              </div>
+            </div>
+
+            {/* Sync Now Trigger Button */}
+            <div className="shrink-0 flex items-center gap-3">
+              <button
+                id="btn-sync-now-top"
+                type="button"
+                onClick={handleTriggerSyncNow}
+                disabled={isTriggeringSyncNow}
+                className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-[#7F00FF] hover:bg-[#6e00de] text-white font-bold text-sm transition-all duration-200 shadow-md shadow-[#7F00FF]/25 flex items-center justify-center gap-2.5 disabled:opacity-50 cursor-pointer active:scale-95"
+              >
+                <RefreshCw className={`w-4 h-4 ${isTriggeringSyncNow ? 'animate-spin' : ''}`} />
+                <span>{isTriggeringSyncNow ? 'جارٍ المزامنة وسحب الأسعار...' : 'مزامنة الآن'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Sync Feedback Message */}
+          {syncFeedback && (
+            <div
+              id="sync-feedback-banner"
+              className={`p-4 rounded-2xl border flex items-start gap-3 text-xs sm:text-sm animate-in fade-in duration-200 ${
+                syncFeedback.type === 'success'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300'
+                  : syncFeedback.type === 'error'
+                  ? 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800/50 text-rose-800 dark:text-rose-300'
+                  : 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800/50 text-blue-800 dark:text-blue-300'
+              }`}
+            >
+              {syncFeedback.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-500 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-5 h-5 shrink-0 text-rose-500 mt-0.5" />
+              )}
+              <div className="space-y-1 flex-1">
+                <p className="font-bold">{syncFeedback.text}</p>
+                {syncFeedback.stats && (
+                  <div className="flex flex-wrap gap-2 pt-1 text-[11px] font-semibold">
+                    <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 rounded-lg">إجمالي: {syncFeedback.stats.total} باقة</span>
+                    <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/40 rounded-lg">ألعاب: {syncFeedback.stats.games}</span>
+                    <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900/40 rounded-lg">تطبيقات: {syncFeedback.stats.apps}</span>
+                    <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/40 rounded-lg">بطاقات: {syncFeedback.stats.cards}</span>
+                    <span className="px-2 py-0.5 bg-cyan-100 dark:bg-cyan-900/40 rounded-lg">اتصالات: {syncFeedback.stats.telecom}</span>
+                    <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 rounded-lg">كاش: {syncFeedback.stats.cash}</span>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setSyncFeedback(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* 4 Status Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: Last Sync */}
+            <div className="bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">آخر مزامنة ناجحة</span>
+                <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#7F00FF] dark:text-purple-400 flex items-center justify-center">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div>
+                <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white font-mono">
+                  {syncSettings?.lastSyncAt
+                    ? new Date(syncSettings.lastSyncAt).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })
+                    : 'لم تتم المزامنة بعد'}
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
+                  {syncSettings?.lastSyncMessage || 'جاهز للبدء'}
+                </p>
+              </div>
+            </div>
+
+            {/* Card 2: Next Sync */}
+            <div className="bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">المزامنة القادمة</span>
+                <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                  <Clock className="w-4 h-4" />
+                </div>
+              </div>
+              <div>
+                <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white font-mono">
+                  {syncSettings?.autoSyncEnabled && syncSettings?.nextSyncAt
+                    ? new Date(syncSettings.nextSyncAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+                    : 'المزامنة التلقائية معطلة'}
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  {syncSettings?.autoSyncEnabled
+                    ? `تلقائياً كل ${syncSettings.intervalMinutes} دقيقة`
+                    : 'يمكنك تفعيلها أدناه'}
+                </p>
+              </div>
+            </div>
+
+            {/* Card 3: Total Synced Products */}
+            <div className="bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">المنتجات والباقات</span>
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                  <ShoppingBag className="w-4 h-4" />
+                </div>
+              </div>
+              <div>
+                <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white font-mono">
+                  {syncSettings?.lastSyncStats?.total ? `${syncSettings.lastSyncStats.total} باقة` : '150+ باقة'}
+                </p>
+                <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  <span>ألعاب: {syncSettings?.lastSyncStats?.games ?? 65}</span>
+                  <span>•</span>
+                  <span>تطبيقات: {syncSettings?.lastSyncStats?.apps ?? 40}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Card 4: Profit Integration Status */}
+            <div className="bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">الربح الشامل المطبق</span>
+                <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                  <Percent className="w-4 h-4" />
+                </div>
+              </div>
+              <div>
+                <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white font-mono">
+                  {profitConfig.enabled && profitConfig.percentage > 0 ? `+${profitConfig.percentage}%` : 'سعر المورد المباشر'}
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  يُحسب السعر النهائي فور سحب السعر الأساسي
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Form & Interval Configuration */}
+          <div className="bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-white/5 pb-5">
+              <div>
+                <h4 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+                  تحديد زمن دورة المزامنة التلقائية (بالدقائق)
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  حدد الفاصل الزمني بالدقيقة الذي يقوم بعده السيرفر بالاتصال التلقائي بمزود الخدمة وتحديث الأسعار والمخزون.
+                </p>
+              </div>
+
+              {/* Auto Sync Toggle */}
+              <label className="flex items-center gap-3 cursor-pointer select-none bg-slate-50 dark:bg-slate-900/60 p-2.5 px-4 rounded-2xl border border-slate-200/80 dark:border-white/10">
+                <input
+                  type="checkbox"
+                  checked={autoSyncEnabledInput}
+                  onChange={(e) => setAutoSyncEnabledInput(e.target.checked)}
+                  className="w-4 h-4 accent-[#7F00FF] cursor-pointer rounded"
+                />
+                <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200">
+                  {autoSyncEnabledInput ? 'المزامنة التلقائية مفعلة ✅' : 'المزامنة التلقائية معطلة ⏸️'}
+                </span>
+              </label>
+            </div>
+
+            <form onSubmit={handleSaveSyncSettings} className="space-y-6">
+              {/* Minutes Input with Quick Presets */}
+              <div className="space-y-3">
+                <label className="block text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-300">
+                  زمن المزامنة من المورد بالدقيقة (مثال: كل ٦٠ دقيقة):
+                </label>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 max-w-xl">
+                  <div className="relative flex-1">
+                    <input
+                      id="input-sync-interval-minutes"
+                      type="number"
+                      min={1}
+                      max={10080}
+                      step={1}
+                      required
+                      value={syncIntervalInput}
+                      onChange={(e) => setSyncIntervalInput(e.target.value)}
+                      placeholder="60"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white text-base font-mono focus:outline-none focus:border-[#7F00FF] transition-all pl-16 text-left"
+                      dir="ltr"
+                    />
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 font-sans pointer-events-none">
+                      دقيقة
+                    </span>
+                  </div>
+
+                  <button
+                    id="btn-save-sync-interval"
+                    type="submit"
+                    disabled={isSavingSyncSettings}
+                    className="px-6 py-3 bg-[#7F00FF] hover:bg-[#6e00de] text-white rounded-2xl font-bold text-xs sm:text-sm transition-all duration-200 shadow-sm disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shrink-0"
+                  >
+                    {isSavingSyncSettings ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>جارٍ الحفظ...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>حفظ زمن المزامنة</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  * مثال: عند ضبط القيمة على <strong className="text-slate-800 dark:text-slate-200">60</strong>، يقوم المتجر كل ساعة بتحديث أسعار جميع الألعاب وباقات الشحن من المورد مباشرة.
+                </p>
+              </div>
+
+              {/* Quick Preset Chips */}
+              <div className="space-y-2">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
+                  خيارات أوقات سريعة:
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: 'كل 15 دقيقة', value: 15 },
+                    { label: 'كل 30 دقيقة', value: 30 },
+                    { label: 'كل 60 دقيقة (موصى به)', value: 60 },
+                    { label: 'كل 120 دقيقة (ساعتان)', value: 120 },
+                    { label: 'كل 360 دقيقة (6 ساعات)', value: 360 },
+                    { label: 'كل 1440 دقيقة (24 ساعة)', value: 1440 },
+                  ].map((preset) => {
+                    const isSelected = syncIntervalInput === String(preset.value);
+                    return (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => setSyncIntervalInput(String(preset.value))}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#7F00FF] text-white shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 border border-slate-200/60 dark:border-white/5'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </form>
+          </div>
+
+          {/* Sync Now Detailed Box */}
+          <div className="bg-gradient-to-br from-purple-500/5 via-indigo-500/5 to-transparent border border-purple-200/60 dark:border-purple-900/30 rounded-3xl p-6 sm:p-8 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h4 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-[#7F00FF] dark:text-purple-400" />
+                  <span>المزامنة الفورية اليدوية (Sync Now)</span>
+                </h4>
+                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
+                  تريد تحديث الأسعار والمخزون دون انتظار الدورة المجدولة القادمة؟ اضغط على زر "مزامنة الآن" وسيتم جلب وتخزين أحدث قائمة أسعار فوراً لجميع الزوار.
+                </p>
+              </div>
+
+              <button
+                id="btn-sync-now-card"
+                type="button"
+                onClick={handleTriggerSyncNow}
+                disabled={isTriggeringSyncNow}
+                className="px-6 py-3.5 rounded-2xl bg-[#7F00FF] hover:bg-[#6e00de] text-white font-bold text-xs sm:text-sm transition-all duration-200 shadow-md shadow-[#7F00FF]/25 flex items-center justify-center gap-2.5 disabled:opacity-50 cursor-pointer active:scale-95 shrink-0"
+              >
+                <RefreshCw className={`w-4 h-4 ${isTriggeringSyncNow ? 'animate-spin' : ''}`} />
+                <span>{isTriggeringSyncNow ? 'جارٍ فحص المورد والمزامنة...' : 'مزامنة الآن'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Educational Notes & Architecture Guide */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 space-y-2">
+              <div className="flex items-center gap-2 text-[#7F00FF] dark:text-purple-400">
+                <Percent className="w-4 h-4" />
+                <h5 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white">حساب هامش الربح</h5>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                يتم تطبيق نسبة الربح الشاملة المحددة في لوحة التحكم (+{profitConfig.percentage}%) فوراً وتلقائياً على كل باقة بعد مزامنة سعر تكلفتها من المورد.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 space-y-2">
+              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" />
+                <h5 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white">توفر المخزون الحي</h5>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                تمنع المزامنة الدورية ظهور الباقات المتوقفة أو غير المتوفرة لدى المورد لتفادي أي أخطاء أثناء تنفيذ طلبات شحن العملاء.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 space-y-2">
+              <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                <Clock className="w-4 h-4" />
+                <h5 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white">ذاكرة كاش سريعة</h5>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                يتم حفظ بيانات المزامنة في ذاكرة المتجر المؤقتة وقاعدة البيانات لتوفير تصفح فائق السرعة للزبائن دون استهلاك مكثف لحدود API المورد.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7.5. TAB: DEPOSITS & METHODS MANAGEMENT */}
+      {activeAdminTab === 'deposits' && (
+        <AdminDepositsTab
+          adminEmail={currentUser?.email || ADMIN_AUTHORIZED_EMAIL}
+          onBalanceUpdated={fetchAdminUsers}
+        />
       )}
 
       {/* 8. MODAL: EDIT USER DETAILS */}

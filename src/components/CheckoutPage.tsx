@@ -21,6 +21,7 @@ import { createNewOrder } from '../services/scStoreApi';
 import { saveOrderToDb } from '../services/dbApi';
 import { getProductFieldMetadata, getProductServiceType } from '../utils/productUtils';
 import { convertToSyp, formatSypNumber } from '../utils/currencyUtils';
+import { useProfitMargin } from '../utils/profitUtils';
 
 interface CheckoutPageProps {
   product: Product;
@@ -41,6 +42,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   onNavigateToTracking,
   onNavigateHome,
 }) => {
+  // Subscribe to profit margin updates in real-time
+  useProfitMargin();
+
   const [qty, setQty] = useState<number>(orderOptions?.qty || product.minQty || 1);
   const [dynamicFields, setDynamicFields] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -306,8 +310,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
           
           {/* Card Header with Product Context & Title */}
           <div className="pb-4 border-b border-slate-100 dark:border-white/5 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-12 h-12 rounded-2xl overflow-hidden bg-slate-900 border border-slate-200 dark:border-white/10 shrink-0 p-0.5 shadow-xs">
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="w-14 h-14 rounded-2xl overflow-hidden bg-slate-900 border border-slate-200 dark:border-white/10 shrink-0 p-0.5 shadow-xs">
                 <img
                   src={product.image || 'https://sc-store.top/logos/game-charge.png'}
                   alt={product.name}

@@ -9,6 +9,8 @@ export interface MerchantInfo {
   role?: string;
   storeName?: string;
   lastUpdated?: string;
+  emailVerified?: boolean;
+  identityVerified?: boolean;
 }
 
 export interface DynamicFieldConfig {
@@ -109,5 +111,49 @@ export interface StoreBanner {
   badgeText?: string;
   isActive?: boolean;
   order?: number;
+}
+
+export interface DepositMethod {
+  id: string;
+  name: string; // اسم طريقة الإيداع
+  currency: string; // عملة الإيداع (مثال: SYP, USDT, USD, TRY)
+  exchangeRateToSyp: number; // سعر صرف عملة الإيداع مقابل الليرة السورية
+  depositAddress: string; // عنوان الإيداع (رقم هاتف، محفظة، حساب بنكي)
+  minDeposit: number; // أقل مبلغ يمكن إيداعه
+  maxDeposit: number; // أقصى مبلغ يمكن إيداعه
+  details: string; // تفاصيل الإيداع (نص مع دعم الفراغات والأسطر)
+  icon: string; // ايقونة طريقة الإيداع (رابط صورة أو اسم أيقونة)
+  feeEnabled: boolean; // الرسوم مفعلة للطريقة أم لا
+  feePercentage: number; // قيمة نسبة الرسوم مثال 2%
+  isActive?: boolean; // حالة تفعيل الطريقة
+  order?: number; // ترتيب العرض
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DepositRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userPhone?: string;
+  methodId: string;
+  methodName: string;
+  currency: string;
+  exchangeRateToSyp: number;
+  amount: number; // المبلغ المدخل
+  feeAmount: number; // قيمة الرسوم
+  feePercentage: number; // نسبة الرسوم
+  netAmount: number; // المبلغ الصافي
+  sypAmount: number; // المبلغ بالليرة السورية المضاف للرصيد
+  txNumber: string; // رقم العملية
+  depositAddress: string;
+  notes?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  rejectionReason?: string;
+  createdAt: string;
+  updatedAt?: string;
+  approvedAt?: string;
+  approvedBy?: string;
 }
 

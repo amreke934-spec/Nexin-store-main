@@ -4,6 +4,7 @@ import { Product } from '../../types';
 import { getProductServiceType } from '../../utils/productUtils';
 import { extractGiftCardDetails } from '../../utils/giftCardUtils';
 import { getProductDisplayPrice } from '../../utils/currencyUtils';
+import { useProfitMargin } from '../../utils/profitUtils';
 
 interface PackageCardProps {
   product: Product;
@@ -11,6 +12,9 @@ interface PackageCardProps {
 }
 
 export const PackageCard: React.FC<PackageCardProps> = React.memo(({ product, onSelect }) => {
+  // Subscribe to profit margin changes for instantaneous zero-delay price reactivity
+  useProfitMargin();
+
   const serviceType = getProductServiceType(product);
   const isCash = serviceType === 'cash' || product.isCash;
   const isTelecom =
@@ -41,8 +45,8 @@ export const PackageCard: React.FC<PackageCardProps> = React.memo(({ product, on
 
       {/* Top Header with game logo & ID */}
       <div className="relative z-10 flex items-center justify-between gap-1 mb-1.5 sm:mb-2">
-        <div className="flex items-center gap-1.5 overflow-hidden">
-          <div className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 rounded-lg sm:rounded-xl overflow-hidden bg-black/60 border border-white/20 shrink-0 p-0.5 shadow-xs">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-lg sm:rounded-xl overflow-hidden bg-black/60 border border-white/20 shrink-0 p-0.5 shadow-xs">
             <img
               src={product.image}
               alt={product.name}

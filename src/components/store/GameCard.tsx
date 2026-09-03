@@ -1,7 +1,6 @@
 import React from 'react';
-import { Layers, ChevronLeft, Zap, ArrowLeft, Tag } from 'lucide-react';
+import { Layers, Zap, ArrowLeft } from 'lucide-react';
 import { Product } from '../../types';
-import { getProductDisplayPrice } from '../../utils/currencyUtils';
 
 export interface GameGroup {
   gameName: string;
@@ -28,8 +27,6 @@ export const GameCard: React.FC<GameCardProps> = React.memo(({ game, onSelectGam
     return `${count} باقة`;
   };
 
-  const displayPrice = getProductDisplayPrice(game.minPrice, game.currency || 'USD');
-
   return (
     <div
       onClick={() => onSelectGame(game.gameName)}
@@ -47,9 +44,9 @@ export const GameCard: React.FC<GameCardProps> = React.memo(({ game, onSelectGam
         </span>
       </div>
 
-      {/* Center Row: Game Icon & Title */}
-      <div className="relative my-2 sm:my-3 z-10 flex flex-col sm:flex-row items-center sm:items-center gap-2 sm:gap-3 text-center sm:text-right">
-        <div className="w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 rounded-xl sm:rounded-2xl overflow-hidden bg-slate-950 border-2 border-slate-700/80 group-hover:border-[#7F00FF] shadow-md shadow-black/50 transition-colors duration-200 p-0.5 shrink-0">
+      {/* Center Row: Game Icon & Title (enlarged by ~20%) */}
+      <div className="relative my-2 sm:my-3 z-10 flex flex-col sm:flex-row items-center sm:items-center gap-2.5 sm:gap-3.5 text-center sm:text-right">
+        <div className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 rounded-xl sm:rounded-2xl overflow-hidden bg-slate-950 border-2 border-slate-700/80 group-hover:border-[#7F00FF] shadow-md shadow-black/50 transition-colors duration-200 p-0.5 shrink-0">
           <img
             src={game.image}
             alt={game.gameName}
@@ -75,26 +72,16 @@ export const GameCard: React.FC<GameCardProps> = React.memo(({ game, onSelectGam
         </div>
       </div>
 
-      {/* Bottom Row: Starting Price in Syrian Pounds and Interactive Action Button */}
+      {/* Bottom Row: Interactive Action Button without starting price */}
       <div className="pt-2 sm:pt-2.5 border-t border-white/10 dark:border-slate-800 flex items-center justify-between gap-1.5 z-10 mt-auto">
-        <div>
-          <span className="text-[7.5px] sm:text-[8.5px] md:text-[9.5px] text-slate-400 block font-medium leading-none mb-0.5">يبدأ من</span>
-          <div className="flex items-baseline gap-0.5">
-            <span className="text-xs sm:text-sm md:text-base font-black text-white font-mono leading-none">
-              {displayPrice.formattedNumber}
-            </span>
-            <span className="text-[7.5px] sm:text-[9px] md:text-[10px] font-bold text-purple-300">
-              {displayPrice.currencySymbol}
-            </span>
-          </div>
-        </div>
+        <span className="text-[8.5px] sm:text-[9.5px] md:text-[10.5px] text-purple-300 font-bold">
+          باقات وفئات متعددة
+        </span>
 
         {/* Action Button */}
-        <div className="inline-flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-[#7F00FF] group-hover:bg-[#6b00d6] text-white text-[8px] sm:text-[10px] md:text-xs font-bold transition-all shadow-xs shadow-[#7F00FF]/25 shrink-0">
-          <span className="hidden xs:inline">عرض</span>
-          <span className="xs:hidden">الباقات</span>
-          <span className="hidden xs:inline">الباقات</span>
-          <ArrowLeft className="w-2.5 h-2.5 sm:w-3 sm:h-3 group-hover:-translate-x-0.5 transition-transform" />
+        <div className="inline-flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg sm:rounded-xl bg-[#7F00FF] group-hover:bg-[#6b00d6] text-white text-[8.5px] sm:text-[10px] md:text-xs font-bold transition-all shadow-xs shadow-[#7F00FF]/25 shrink-0">
+          <span>عرض الباقات</span>
+          <ArrowLeft className="w-3 h-3 group-hover:-translate-x-0.5 transition-transform" />
         </div>
       </div>
     </div>

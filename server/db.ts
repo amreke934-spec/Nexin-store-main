@@ -132,6 +132,34 @@ const SCHEMA_DEFINITIONS: TableDefinition[] = [
       { name: 'updated_at', type: 'TIMESTAMPTZ', default: 'NOW()' },
     ],
   },
+  {
+    name: 'deposit_requests',
+    primaryKey: 'id VARCHAR(128) PRIMARY KEY',
+    columns: [
+      { name: 'user_id', type: 'VARCHAR(128)', nullable: false },
+      { name: 'user_name', type: 'VARCHAR(255)' },
+      { name: 'user_email', type: 'VARCHAR(255)' },
+      { name: 'user_phone', type: 'VARCHAR(100)' },
+      { name: 'method_id', type: 'VARCHAR(128)', nullable: false },
+      { name: 'method_name', type: 'VARCHAR(255)', nullable: false },
+      { name: 'currency', type: 'VARCHAR(20)', default: "'SYP'" },
+      { name: 'exchange_rate_to_syp', type: 'NUMERIC(15, 2)', default: '1.00' },
+      { name: 'amount', type: 'NUMERIC(15, 2)', nullable: false },
+      { name: 'fee_amount', type: 'NUMERIC(15, 2)', default: '0.00' },
+      { name: 'fee_percentage', type: 'NUMERIC(6, 2)', default: '0.00' },
+      { name: 'net_amount', type: 'NUMERIC(15, 2)', nullable: false },
+      { name: 'syp_amount', type: 'NUMERIC(15, 2)', nullable: false },
+      { name: 'tx_number', type: 'VARCHAR(255)', nullable: false },
+      { name: 'deposit_address', type: 'TEXT' },
+      { name: 'notes', type: 'TEXT' },
+      { name: 'status', type: 'VARCHAR(50)', default: "'pending'" },
+      { name: 'rejection_reason', type: 'TEXT' },
+      { name: 'approved_at', type: 'TIMESTAMPTZ' },
+      { name: 'approved_by', type: 'VARCHAR(128)' },
+      { name: 'created_at', type: 'TIMESTAMPTZ', default: 'NOW()' },
+      { name: 'updated_at', type: 'TIMESTAMPTZ', default: 'NOW()' },
+    ],
+  },
 ];
 
 /**
@@ -180,6 +208,8 @@ export async function initializeDatabase(): Promise<{ success: boolean; error?: 
       CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
       CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id);
       CREATE INDEX IF NOT EXISTS idx_transactions_user ON wallet_transactions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_deposit_requests_user ON deposit_requests(user_id);
+      CREATE INDEX IF NOT EXISTS idx_deposit_requests_status ON deposit_requests(status);
     `);
 
     // Insert default exchange rate setting if not present
@@ -188,6 +218,77 @@ export async function initializeDatabase(): Promise<{ success: boolean; error?: 
       VALUES ('exchange_rate', '{"usd_to_syp": 15000}', NOW())
       ON CONFLICT (key) DO NOTHING;
     `);
+
+    // Insert default deposit methods if not present
+    const defaultDepositMethods = [
+      {
+        id: 'method_sham_cash',
+        name: 'شام كاش (Sham Cash)',
+        currency: 'SYP',
+        exchangeRateToSyp: 1,
+        depositAddress: '0988 123 456',
+        minDeposit: 10000,
+        maxDeposit: 5000000,
+        details: '1. افتح تطبيق شام كاش على هاتفك.\n2. قم بتحويل المبلغ المطلوب إلى الرقم الموضح أعلاه باسم (متجر نيكسن ستور).\n3. بعد نجاح التحويل، أدخل رقم إشعار العملية لتأكيد وشحن رصيدك فوراً.',
+        icon: 'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=128&auto=format&fit=crop&q=80',
+        feeEnabled: false,
+        feePercentage: 0,
+        isActive: true,
+        order: 1,
+      },
+      {
+        id: 'method_syriatel_cash',
+        name: 'سيريتل كاش (Syriatel Cash)',
+        currency: 'SYP',
+        exchangeRateToSyp: 1,
+        depositAddress: '0933 654 321',
+        minDeposit: 10000,
+        maxDeposit: 2000000,
+        details: '1. قم بالتحويل من محفظة سيريتل كاش أو عبر طلب الرمز #304* إلى الرقم أعلاه.\n2. بعد استلام رسالة التأكيد من سيريتل كاش، انسخ رقم العملية وضعه في الخانة المخصصة.\n3. سيتم مراجعة الطلب وإيداع الرصيد في حسابك خلال دقائق.',
+        icon: 'https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=128&auto=format&fit=crop&q=80',
+        feeEnabled: false,
+        feePercentage: 0,
+        isActive: true,
+        order: 2,
+      },
+      {
+        id: 'method_usdt_trc20',
+        name: 'USDT (TRC-20)',
+        currency: 'USDT',
+        exchangeRateToSyp: 15000,
+        depositAddress: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t7K9mX',
+        minDeposit: 5,
+        maxDeposit: 1000,
+        details: '1. أرسل عملة USDT حصراً عبر شبكة Tron (TRC-20) إلى عنوان المحفظة أعلاه.\n2. تحذير: لا ترسل أي عملة أخرى أو عبر شبكة مختلفة لتفادي ضياع الأموال.\n3. بعد تأكيد التحويل في محفظتك (Binance / TrustWallet / Bybit)، الصق رمز التجزئة أو رقم المعاملة (TXID).',
+        icon: 'https://cryptologos.cc/logos/tether-usdt-logo.png?v=035',
+        feeEnabled: true,
+        feePercentage: 1.5,
+        isActive: true,
+        order: 3,
+      },
+      {
+        id: 'method_alharam',
+        name: 'شركة الهرم للحوالات',
+        currency: 'SYP',
+        exchangeRateToSyp: 1,
+        depositAddress: 'دمشق - المستلم: متجر نيكسن لخدمات الشحن - هاتف: 0999 888 777',
+        minDeposit: 50000,
+        maxDeposit: 15000000,
+        details: '1. توجه إلى أي فرع من فروع شركة الهرم للحوالات.\n2. أرسل الحوالة بالاسم والرقم الموضح أعلاه.\n3. التقط صورة لإيصال الحوالة واحتفظ به، ثم أدخل رقم إشعار الحوالة المطبوع على الإيصال.',
+        icon: 'https://images.unsplash.com/photo-1580519542036-c47de6196ba5?w=128&auto=format&fit=crop&q=80',
+        feeEnabled: false,
+        feePercentage: 0,
+        isActive: true,
+        order: 4,
+      }
+    ];
+
+    await client.query(`
+      INSERT INTO store_settings (key, value, updated_at)
+      VALUES ('deposit_methods', $1, NOW())
+      ON CONFLICT (key) DO NOTHING;
+    `, [JSON.stringify(defaultDepositMethods)]);
+
 
     return { success: true, message: 'Database tables and columns pushed successfully' };
   } catch (err: any) {

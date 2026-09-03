@@ -11,6 +11,7 @@ import { Product } from '../../types';
 import { getProductFieldMetadata, getProductServiceType } from '../../utils/productUtils';
 import { extractGiftCardDetails } from '../../utils/giftCardUtils';
 import { convertToSyp, formatSypNumber } from '../../utils/currencyUtils';
+import { useProfitMargin } from '../../utils/profitUtils';
 
 interface GamePackagesViewProps {
   gameName: string;
@@ -27,6 +28,9 @@ export const GamePackagesView: React.FC<GamePackagesViewProps> = React.memo(({
   onBack,
   onSelectProduct,
 }) => {
+  // Subscribe to profit margin updates in real-time
+  useProfitMargin();
+
   const activeProduct = packages[0];
   const fieldMeta = getProductFieldMetadata(activeProduct);
   const serviceType = getProductServiceType(activeProduct);
@@ -46,8 +50,8 @@ export const GamePackagesView: React.FC<GamePackagesViewProps> = React.memo(({
       <div className="bg-gradient-to-r from-[#181424] via-[#13101e] to-[#0c0a13] border border-white/10 rounded-3xl p-5 sm:p-7 text-white relative overflow-hidden shadow-lg">
         <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            {/* App Icon */}
-            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden bg-gray-900 border-2 border-white/15 shrink-0 shadow-lg shadow-black/50 p-0.5">
+            {/* App Icon (enlarged by ~20%) */}
+            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl sm:rounded-3xl overflow-hidden bg-gray-900 border-2 border-white/15 shrink-0 shadow-lg shadow-black/50 p-0.5">
               <img
                 src={mainImage}
                 alt={gameName}

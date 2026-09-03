@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Package, LayoutGrid, Menu, Info, LogIn } from 'lucide-react';
+import { Settings, Package, LayoutGrid, Menu, Info, LogIn, Wallet } from 'lucide-react';
 import { MerchantInfo, CustomerUser } from '../types';
 
 interface NavbarProps {
@@ -11,6 +11,7 @@ interface NavbarProps {
   onOpenUserOrders: () => void;
   onOpenSettings?: () => void;
   onOpenSidebar: () => void;
+  onOpenDeposit?: () => void;
   activeTab: 'products' | 'orders' | 'track' | 'settings' | 'history' | 'auth' | 'admin' | 'about' | string;
   setActiveTab: (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about') => void;
   ordersCount: number;
@@ -22,6 +23,7 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
   currentUser,
   onOpenAuth,
   onOpenSidebar,
+  onOpenDeposit,
   activeTab,
   setActiveTab,
   ordersCount,
@@ -117,17 +119,32 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
           {/* 2. RIGHT: Clean Quick Action (Login / Profile if needed, or simple direct indicator) */}
           <div className="flex items-center gap-2">
             {currentUser ? (
-              <button
-                id="user-profile-btn"
-                onClick={onOpenSidebar}
-                title="فتح القائمة الشخصية"
-                className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl border border-purple-200 dark:border-purple-800/60 bg-purple-50/50 dark:bg-purple-950/40 hover:bg-purple-100/60 dark:hover:bg-purple-900/60 text-[#7F00FF] dark:text-purple-300 text-xs font-bold transition-all cursor-pointer"
-              >
-                <div className="w-6 h-6 rounded-full bg-[#7F00FF] text-white flex items-center justify-center text-[11px] font-bold">
-                  {currentUser.name.charAt(0).toUpperCase()}
-                </div>
-                <span className="max-w-[80px] sm:max-w-[110px] truncate hidden sm:inline">{currentUser.name}</span>
-              </button>
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                {onOpenDeposit && (
+                  <button
+                    id="nav-deposit-btn"
+                    type="button"
+                    onClick={onOpenDeposit}
+                    className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-[#7F00FF] hover:brightness-110 active:scale-98 text-white px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs shadow-emerald-600/20 cursor-pointer whitespace-nowrap"
+                    title="إيداع وشحن الرصيد"
+                  >
+                    <Wallet className="w-3.5 h-3.5" />
+                    <span>إيداع</span>
+                  </button>
+                )}
+
+                <button
+                  id="user-profile-btn"
+                  onClick={onOpenSidebar}
+                  title="فتح القائمة الشخصية"
+                  className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl border border-purple-200 dark:border-purple-800/60 bg-purple-50/50 dark:bg-purple-950/40 hover:bg-purple-100/60 dark:hover:bg-purple-900/60 text-[#7F00FF] dark:text-purple-300 text-xs font-bold transition-all cursor-pointer"
+                >
+                  <div className="w-6 h-6 rounded-full bg-[#7F00FF] text-white flex items-center justify-center text-[11px] font-bold">
+                    {currentUser.name.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="max-w-[80px] sm:max-w-[110px] truncate hidden sm:inline">{currentUser.name}</span>
+                </button>
+              </div>
             ) : (
               <button
                 id="auth-login-btn"

@@ -304,6 +304,8 @@ export async function fetchMerchantInfo(apiKey?: string): Promise<{ data: Mercha
           role: user.role || 'merchant',
           storeName: user.store_name || user.storeName || 'Nexen Store - SC Top',
           lastUpdated: new Date().toLocaleTimeString('ar-EG'),
+          emailVerified: user.emailVerified !== undefined ? Boolean(user.emailVerified) : true,
+          identityVerified: user.identityVerified !== undefined ? Boolean(user.identityVerified) : true,
         },
         raw: json,
       };
@@ -793,3 +795,117 @@ export async function updateScApiKey(apiKey: string): Promise<{
     return { success: false, message: err.message || 'فشل الاتصال بالخادم' };
   }
 }
+
+/**
+ * 8. Product & Price Sync Settings and Controls
+ */
+export interface SyncSettingsData {
+  intervalMinutes: number;
+  autoSyncEnabled: boolean;
+  lastSyncAt: string | null;
+  lastSyncStatus: 'success' | 'fallback' | 'error' | 'idle';
+  lastSyncMessage: string;
+  lastSyncStats: {
+    total: number;
+    games: number;
+    apps: number;
+    cards: number;
+    telecom: number;
+    cash: number;
+  } | null;
+  nextSyncAt: string | null;
+  isSyncing: boolean;
+}
+
+export interface TriggerSyncResponse {
+  success: boolean;
+  isLive?: boolean;
+  isFallback?: boolean;
+  message: string;
+  timestamp?: string;
+  settings?: SyncSettingsData;
+  stats?: {
+    total: number;
+    games: number;
+    apps: number;
+    cards: number;
+    telecom: number;
+    cash: number;
+  };
+  error?: string;
+}
+
+/**
+ * Fetch current sync configuration & status
+ */
+export async function getScSyncSettings(): Promise<SyncSettingsData> {
+  try {
+    const res = await fetch('/api/sc/sync/status');
+    const data = await res.json();
+    return {
+      intervalMinutes: data.intervalMinutes ?? 60,
+      autoSyncEnabled: data.autoSyncEnabled ?? true,
+      lastSyncAt: data.lastSyncAt ?? null,
+      lastSyncStatus: data.lastSyncStatus ?? 'idle',
+      lastSyncMessage: data.lastSyncMessage ?? '',
+      lastSyncStats: data.lastSyncStats ?? null,
+      nextSyncAt: data.nextSyncAt ?? null,
+      isSyncing: Boolean(data.isSyncing),
+    };
+  } catch {
+    return {
+      intervalMinutes: 60,
+      autoSyncEnabled: true,
+      lastSyncAt: null,
+      lastSyncStatus: 'idle',
+      lastSyncMessage: 'تعذر الاتصال بالخادم',
+      lastSyncStats: null,
+      nextSyncAt: null,
+      isSyncing: false,
+    };
+  }
+}
+
+/**
+ * Save new sync interval (in minutes) and auto-sync toggle
+ */
+export async function saveScSyncSettings(payload: {
+  intervalMinutes?: number;
+  autoSyncEnabled?: boolean;
+}): Promise<{ success: boolean; message: string; settings?: SyncSettingsData; error?: string }> {
+  try {
+    const res = await fetch('/api/sc/sync/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, message: data.error || 'فشل حفظ إعدادات المزامنة' };
+    }
+    return data;
+  } catch (err: any) {
+    return { success: false, message: err.message || 'خطأ في الاتصال بالخادم' };
+  }
+}
+
+/**
+ * Trigger immediate product and price sync from supplier
+ */
+export async function triggerScSyncNow(): Promise<TriggerSyncResponse> {
+  try {
+    const res = await fetch('/api/sc/sync/now', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || 'فشل تنفيذ المزامنة الفورية',
+      error: err.message,
+    };
+  }
+}
+

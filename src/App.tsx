@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, startTransition } from 'react';
 import { MerchantInfo, Product, CustomerUser, OrderItem, OrderOptions, StoreBanner } from './types';
 import { fetchMerchantInfo, fetchProducts } from './services/scStoreApi';
-import { fetchUserOrdersFromDb, fetchStoreSetting, saveStoreSetting } from './services/dbApi';
+import { fetchUserOrdersFromDb, fetchStoreSetting, saveStoreSetting, fetchUserProfile } from './services/dbApi';
 import { setExchangeRate } from './utils/currencyUtils';
 import { setProfitMarginConfig, ProfitMarginConfig } from './utils/profitUtils';
 import { getSavedBanners, saveBannersLocally } from './data/defaultBanners';
@@ -19,6 +19,7 @@ import { SidebarDrawer } from './components/SidebarDrawer';
 import { AboutPage } from './components/AboutPage';
 import { BannerManagementModal } from './components/BannerManagementModal';
 import { FloatingSupportWidget } from './components/FloatingSupportWidget';
+import { DepositModal } from './components/DepositModal';
 
 export default function App() {
   // Splash Screen initial state
@@ -30,6 +31,9 @@ export default function App() {
   // Banner Slider State & Management
   const [banners, setBanners] = useState<StoreBanner[]>(() => getSavedBanners());
   const [isBannerModalOpen, setIsBannerModalOpen] = useState<boolean>(false);
+
+  // User Deposit Modal State
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState<boolean>(false);
 
   // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track' | 'about' | 'checkout'
   const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track' | 'about' | 'checkout'>('products');
@@ -206,10 +210,20 @@ export default function App() {
     }
   }, []);
 
-  // Initial load
+  // Initial load & product sync listener
   useEffect(() => {
     loadMerchantData();
     loadProductsData();
+
+    const handleProductsSynced = () => {
+      loadProductsData();
+      setProfitMarginVersion((v) => v + 1);
+    };
+
+    window.addEventListener('nexen-products-synced', handleProductsSynced);
+    return () => {
+      window.removeEventListener('nexen-products-synced', handleProductsSynced);
+    };
   }, [loadMerchantData, loadProductsData]);
 
   // Handle Splash Screen completion
@@ -325,6 +339,22 @@ export default function App() {
   const handleOpenSidebar = useCallback(() => setIsSidebarOpen(true), []);
   const handleCloseSidebar = useCallback(() => setIsSidebarOpen(false), []);
 
+  // Deposit modal helpers
+  const handleOpenDeposit = useCallback(() => setIsDepositModalOpen(true), []);
+  const handleCloseDeposit = useCallback(() => setIsDepositModalOpen(false), []);
+  const handleDepositSuccess = useCallback(async () => {
+    if (currentUser) {
+      try {
+        const updated = await fetchUserProfile(currentUser.email || currentUser.id);
+        if (updated) {
+          setCurrentUser(updated);
+        }
+      } catch (err) {
+        console.error('Failed to reload profile after deposit:', err);
+      }
+    }
+  }, [currentUser]);
+
   // Logout handler
   const handleLogout = useCallback(() => {
     setCurrentUser(null);
@@ -361,6 +391,7 @@ export default function App() {
         onOpenUserOrders={handleNavigateOrders}
         onOpenSettings={handleNavigateSettings}
         onOpenSidebar={handleOpenSidebar}
+        onOpenDeposit={handleOpenDeposit}
         activeTab={activeTab}
         setActiveTab={handleNavigate}
         ordersCount={orders.length}
@@ -376,6 +407,7 @@ export default function App() {
         merchantInfo={merchantInfo}
         isLoadingMerchant={isLoadingMerchant}
         onRefreshMerchant={loadMerchantData}
+        onOpenDeposit={handleOpenDeposit}
         activeTab={activeTab}
         onNavigate={handleNavigate}
         onOpenAuth={handleOpenAuth}
@@ -397,6 +429,8 @@ export default function App() {
             onSelectProduct={handleSelectProduct}
             banners={banners}
             onOpenBannerManager={handleOpenBannerManager}
+            currentUser={currentUser}
+            onOpenDeposit={handleOpenDeposit}
           />
         ) : activeTab === 'orders' || activeTab === 'track' ? (
           <OrdersHistoryPage
@@ -433,6 +467,7 @@ export default function App() {
             onRefreshMerchant={loadMerchantData}
             isLoadingMerchant={isLoadingMerchant}
             onOpenBannerManager={handleOpenBannerManager}
+            onRefreshProducts={loadProductsData}
             onNavigateHome={handleNavigateHome}
             onNavigateSettings={handleNavigateSettings}
           />
@@ -478,6 +513,16 @@ export default function App() {
         banners={banners}
         onSaveBanners={handleSaveBanners}
       />
+
+      {/* User Deposit Modal */}
+      {currentUser && (
+        <DepositModal
+          isOpen={isDepositModalOpen}
+          onClose={handleCloseDeposit}
+          currentUser={currentUser}
+          onSuccess={handleDepositSuccess}
+        />
+      )}
 
       {/* Floating 3-Dots Support & Social Media Action Widget */}
       {!isSplashScreenVisible && <FloatingSupportWidget />}

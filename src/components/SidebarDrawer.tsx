@@ -14,7 +14,8 @@ import {
   ChevronLeft, 
   Sparkles,
   User,
-  RefreshCw
+  RefreshCw,
+  Wallet
 } from 'lucide-react';
 import { CustomerUser, MerchantInfo } from '../types';
 import { NexenLogo } from './NexenLogo';
@@ -28,6 +29,7 @@ interface SidebarDrawerProps {
   merchantInfo: MerchantInfo | null;
   isLoadingMerchant?: boolean;
   onRefreshMerchant?: () => void;
+  onOpenDeposit?: () => void;
   activeTab: string;
   onNavigate: (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about') => void;
   onOpenAuth: (mode?: 'login' | 'register') => void;
@@ -44,6 +46,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
   merchantInfo,
   isLoadingMerchant,
   onRefreshMerchant,
+  onOpenDeposit,
   activeTab,
   onNavigate,
   onOpenAuth,
@@ -203,6 +206,22 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
                     </button>
                   )}
                 </div>
+
+                {/* Deposit CTA Button in Profile Card */}
+                {onOpenDeposit && (
+                  <button
+                    type="button"
+                    id="sidebar-deposit-btn"
+                    onClick={() => {
+                      onOpenDeposit();
+                      onClose();
+                    }}
+                    className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#7F00FF] hover:brightness-110 active:scale-98 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Wallet className="w-4 h-4" />
+                    <span>إيداع وشحن الرصيد</span>
+                  </button>
+                )}
               </div>
             )}
 
@@ -211,6 +230,27 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
               <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-3 uppercase tracking-wider block mb-1">
                 التصفح والخدمات
               </span>
+
+              {/* Deposit Quick Action Link for Logged In User */}
+              {currentUser && onOpenDeposit && (
+                <button
+                  type="button"
+                  id="sidebar-nav-deposit-btn"
+                  onClick={() => {
+                    onOpenDeposit();
+                    onClose();
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-xl text-xs font-bold transition-all cursor-pointer bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 text-emerald-800 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/40 hover:brightness-105"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Wallet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span>إيداع وشحن المحفظة</span>
+                  </div>
+                  <span className="text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-bold">
+                    إيداع
+                  </span>
+                </button>
+              )}
 
               {/* 1. Home / Products */}
               <button

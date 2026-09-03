@@ -344,7 +344,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                   src={product.image}
                   alt={product.name}
                   referrerPolicy="no-referrer"
-                  className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover border border-gray-200 dark:border-white/10 shrink-0 shadow-sm"
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border border-gray-200 dark:border-white/10 shrink-0 shadow-sm"
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">

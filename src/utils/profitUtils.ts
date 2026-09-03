@@ -4,6 +4,8 @@
  * that is automatically calculated and added to SC Store wholesale product prices.
  */
 
+import { useState, useEffect } from 'react';
+
 export interface ProfitMarginConfig {
   percentage: number; // e.g. 10 for 10%
   fixedMarginUsd: number; // e.g. 0.20 for +$0.20
@@ -13,7 +15,7 @@ export interface ProfitMarginConfig {
 const STORAGE_KEY_PROFIT_MARGIN = 'nexen_store_profit_margin_config';
 
 export const DEFAULT_PROFIT_MARGIN_CONFIG: ProfitMarginConfig = {
-  percentage: 0,
+  percentage: 10,
   fixedMarginUsd: 0,
   enabled: true,
 };
@@ -27,8 +29,8 @@ export function getProfitMarginConfig(): ProfitMarginConfig {
     if (saved) {
       const parsed = JSON.parse(saved);
       return {
-        percentage: typeof parsed.percentage === 'number' ? Math.max(0, parsed.percentage) : 0,
-        fixedMarginUsd: typeof parsed.fixedMarginUsd === 'number' ? Math.max(0, parsed.fixedMarginUsd) : 0,
+        percentage: typeof parsed.percentage === 'number' ? Math.max(0, parsed.percentage) : DEFAULT_PROFIT_MARGIN_CONFIG.percentage,
+        fixedMarginUsd: typeof parsed.fixedMarginUsd === 'number' ? Math.max(0, parsed.fixedMarginUsd) : DEFAULT_PROFIT_MARGIN_CONFIG.fixedMarginUsd,
         enabled: parsed.enabled !== false,
       };
     }
@@ -51,29 +53,53 @@ export function setProfitMarginConfig(config: ProfitMarginConfig): void {
 }
 
 /**
- * Calculate final retail price after applying profit margin
- * @param basePriceUsd Wholesale price in USD
+ * Hook to subscribe to profit margin configuration updates in real-time
+ */
+export function useProfitMargin(): ProfitMarginConfig {
+  const [config, setConfig] = useState<ProfitMarginConfig>(getProfitMarginConfig);
+
+  useEffect(() => {
+    const update = () => setConfig(getProfitMarginConfig());
+    window.addEventListener('nexen-profit-margin-changed', update);
+    window.addEventListener('storage', update);
+    return () => {
+      window.removeEventListener('nexen-profit-margin-changed', update);
+      window.removeEventListener('storage', update);
+    };
+  }, []);
+
+  return config;
+}
+
+/**
+ * Calculate final retail price after applying profit margin percentage and fixed fee on top of supplier price
+ * @param basePrice Wholesale/supplier price in USD or SYP
  * @param customConfig Optional override config
  * @returns Retail price with profit margin included
  */
 export function calculateRetailPrice(
-  basePriceUsd: number,
+  basePrice: number,
   customConfig?: ProfitMarginConfig
 ): number {
-  if (typeof basePriceUsd !== 'number' || isNaN(basePriceUsd) || basePriceUsd <= 0) {
+  if (typeof basePrice !== 'number' || isNaN(basePrice) || basePrice <= 0) {
     return 0;
   }
 
   const config = customConfig || getProfitMarginConfig();
 
   if (!config.enabled) {
-    return basePriceUsd;
+    return basePrice;
   }
 
   const percentMultiplier = 1 + Math.max(0, config.percentage) / 100;
-  const withPercentage = basePriceUsd * percentMultiplier;
+  const withPercentage = basePrice * percentMultiplier;
   const finalPrice = withPercentage + (Math.max(0, config.fixedMarginUsd) || 0);
 
-  // Round to 4 decimal places for micro-transactions or 2 for normal
-  return parseFloat(finalPrice.toFixed(4));
+  if (Number.isInteger(finalPrice)) {
+    return finalPrice;
+  }
+  if (finalPrice < 10) {
+    return parseFloat(finalPrice.toFixed(4));
+  }
+  return parseFloat(finalPrice.toFixed(2));
 }

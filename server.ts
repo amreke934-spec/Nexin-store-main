@@ -1076,16 +1076,18 @@ app.get('/api/sc/products', async (req: Request, res: Response) => {
     // fetch live catalog directly from SC Store public section endpoints
     if (!liveProducts) {
       try {
-        const [gamesRes, appsRes, cardsRes] = await Promise.all([
+        const [gamesRes, appsRes, cardsRes, balanceRes] = await Promise.all([
           fetch('https://sc-store.top/api/sections/game-charge/products', { signal: AbortSignal.timeout(3500) }),
           fetch('https://sc-store.top/api/sections/app-charge/products', { signal: AbortSignal.timeout(3500) }),
           fetch('https://sc-store.top/api/sections/cards/products', { signal: AbortSignal.timeout(3500) }).catch(() => null),
+          fetch('https://sc-store.top/api/balance/products', { signal: AbortSignal.timeout(3500) }).catch(() => null),
         ]);
 
         if (gamesRes.ok && appsRes.ok) {
           const gamesData: any = await gamesRes.json();
           const appsData: any = await appsRes.json();
           const cardsData: any = cardsRes && cardsRes.ok ? await cardsRes.json() : { apps: [] };
+          const balanceData: any = balanceRes && balanceRes.ok ? await balanceRes.json().catch(() => null) : null;
 
           const games: any[] = [];
           for (const app of gamesData.apps || []) {
@@ -1158,15 +1160,80 @@ app.get('/api/sc/products', async (req: Request, res: Response) => {
             }
           }
 
+          let liveSyriatel = SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products.syriatel;
+          let liveMtn = SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products.mtn;
+
+          if (balanceData) {
+            if (Array.isArray(balanceData.syriatel) && balanceData.syriatel.length > 0) {
+              liveSyriatel = balanceData.syriatel.map((item: any) => ({
+                id: item.supplierProductId,
+                productId: item.supplierProductId,
+                name: item.name,
+                gameName: 'سيريتل',
+                category: 'وحدات سيريتل',
+                sectionKey: 'syriatel',
+                image: 'https://sc-store.top/logos/syriatel.png',
+                Image_url: 'https://sc-store.top/logos/syriatel.png',
+                image_url: 'https://sc-store.top/logos/syriatel.png',
+                price: Number(Number(item.price).toFixed(2)),
+                currency: 'SYP',
+                inStock: !item.suspended,
+                isAmount: false,
+                minQty: 1,
+                maxQty: 1,
+                dynamicFields: [
+                  {
+                    name: 'phone_number',
+                    label: 'رقم خط سيريتل',
+                    placeholder: '09XXXXXXXX',
+                    required: true,
+                    helpText: 'يرجى إدخال رقم خط سيريتل المراد تعبئته (10 أرقام)',
+                  },
+                ],
+                note: 'تعبئة رصيد وحدات سيريتل فوري ومباشر',
+              }));
+            }
+
+            if (Array.isArray(balanceData.mtn) && balanceData.mtn.length > 0) {
+              liveMtn = balanceData.mtn.map((item: any) => ({
+                id: item.supplierProductId,
+                productId: item.supplierProductId,
+                name: item.name,
+                gameName: 'MTN',
+                category: 'وحدات MTN',
+                sectionKey: 'mtn',
+                image: 'https://sc-store.top/logos/mtn.png',
+                Image_url: 'https://sc-store.top/logos/mtn.png',
+                image_url: 'https://sc-store.top/logos/mtn.png',
+                price: Number(Number(item.price).toFixed(2)),
+                currency: 'SYP',
+                inStock: !item.suspended,
+                isAmount: false,
+                minQty: 1,
+                maxQty: 1,
+                dynamicFields: [
+                  {
+                    name: 'phone_number',
+                    label: 'رقم خط MTN',
+                    placeholder: '09XXXXXXXX',
+                    required: true,
+                    helpText: 'يرجى إدخال رقم خط MTN المراد تعبئته (10 أرقام)',
+                  },
+                ],
+                note: 'تعبئة رصيد وحدات MTN فوري ومباشر',
+              }));
+            }
+          }
+
           liveProducts = {
             products: {
               games,
               apps,
               cards,
-              syriatel: SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products.syriatel,
-              mtn: SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products.mtn,
+              syriatel: liveSyriatel,
+              mtn: liveMtn,
               cashbalances: SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products.cashbalances,
-            }
+            },
           };
           cachedLiveProducts = liveProducts;
         }

@@ -4,6 +4,7 @@ import {
   Zap, 
   ShoppingCart, 
   Wallet,
+  Phone,
   Sparkles,
 } from 'lucide-react';
 import { Product } from '../../types';
@@ -68,25 +69,29 @@ export const GamePackagesView: React.FC<GamePackagesViewProps> = React.memo(({
                 </span>
                 <span
                   className={`text-[11px] flex items-center gap-1 font-medium ${
-                    serviceType === 'cash' ? 'text-emerald-400' : 'text-purple-300'
+                    serviceType === 'cash' ? 'text-emerald-400' : serviceType === 'telecom' ? 'text-amber-300' : 'text-purple-300'
                   }`}
                 >
                   {serviceType === 'cash' ? (
                     <Wallet className="w-3 h-3 text-emerald-400" />
+                  ) : serviceType === 'telecom' ? (
+                    <Phone className="w-3 h-3 text-amber-300" />
                   ) : (
                     <Zap className="w-3 h-3 fill-purple-400" />
                   )}
-                  {fieldMeta.badgeText}
+                  {serviceType === 'telecom' ? `رصيد وحدات ${gameName}` : fieldMeta.badgeText}
                 </span>
               </div>
 
               <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-white tracking-tight">
-                {gameName}
+                {serviceType === 'telecom' ? `شحن وحدات ${gameName}` : gameName}
               </h1>
 
               <p className="text-[11px] sm:text-xs text-gray-400 mt-1">
                 {serviceType === 'cash'
                   ? 'اختر باقة الكاش المطلوبة للانتقال مباشرة لصفحة إدخال رقم المحفظة والتنفيذ الفوري'
+                  : serviceType === 'telecom'
+                  ? 'اختر باقة الوحدات المطلوبة للانتقال مباشرة لصفحة إدخال رقم الهاتف والتعبئة الفورية'
                   : 'اختر باقة الشحن المطلوبة للانتقال إلى صفحة إدخال المعرف (ID) وتأكيد الطلب'}
               </p>
             </div>
@@ -109,7 +114,7 @@ export const GamePackagesView: React.FC<GamePackagesViewProps> = React.memo(({
           <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
             <span
               className={`w-2 h-4 rounded-full inline-block ${
-                serviceType === 'cash' ? 'bg-emerald-500' : 'bg-[#7F00FF]'
+                serviceType === 'cash' ? 'bg-emerald-500' : serviceType === 'telecom' ? 'bg-amber-500' : 'bg-[#7F00FF]'
               }`}
             />
             <span>اختر الباقة المطلوبة ({packages.length} متوفرة)</span>
@@ -187,11 +192,17 @@ export const GamePackagesView: React.FC<GamePackagesViewProps> = React.memo(({
                   <div className="flex items-center gap-1 text-[10px] text-slate-300">
                     {serviceType === 'cash' ? (
                       <Wallet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    ) : serviceType === 'telecom' ? (
+                      <Phone className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                     ) : (
                       <Zap className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300 shrink-0" />
                     )}
                     <span className="truncate">
-                      {serviceType === 'cash' ? 'تحويل فوري' : 'تسليم فوري بالـ ID'}
+                      {serviceType === 'cash'
+                        ? 'تحويل فوري'
+                        : serviceType === 'telecom'
+                        ? 'تعبئة فورية بالرقم'
+                        : 'تسليم فوري بالـ ID'}
                     </span>
                   </div>
 
@@ -207,7 +218,11 @@ export const GamePackagesView: React.FC<GamePackagesViewProps> = React.memo(({
                         onSelectProduct(pkg);
                       }}
                       className={`p-1.5 rounded-xl text-white active:scale-90 transition-transform ${
-                        serviceType === 'cash' ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-[#7F00FF] hover:bg-[#6b00d6]'
+                        serviceType === 'cash'
+                          ? 'bg-emerald-500 hover:bg-emerald-600'
+                          : serviceType === 'telecom'
+                          ? 'bg-amber-500 hover:bg-amber-600'
+                          : 'bg-[#7F00FF] hover:bg-[#6b00d6]'
                       }`}
                       title="شحن الآن"
                     >

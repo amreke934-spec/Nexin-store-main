@@ -29,6 +29,7 @@ export interface Product {
   gameName?: string;
   sectionKey?: string;
   price: number;
+  supplierPrice?: number;
   originalPrice?: number;
   pricePerUnit?: number;
   currency?: string;

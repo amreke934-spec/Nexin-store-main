@@ -23,6 +23,29 @@ export function extractGiftCardDetails(product: Product, gameName?: string): Gif
     cleanName = cleanName.replace(/^[-:–—\s]+/, '');
   }
 
+  const isTelecom =
+    product.sectionKey === 'mtn' ||
+    product.sectionKey === 'syriatel' ||
+    product.category?.includes('وحدات') ||
+    product.category?.includes('MTN') ||
+    product.category?.includes('سيريتل') ||
+    /units|وحدات|mtn|syriatel|سيريتل/i.test(name);
+
+  if (isTelecom) {
+    const isMtn = /mtn/i.test(name) || product.sectionKey === 'mtn' || (product.category && product.category.includes('MTN'));
+    const networkName = isMtn ? 'MTN' : 'سيريتل';
+    const numMatch = name.match(/(\d+[\d,\.]*)/);
+    const unitCount = numMatch ? numMatch[1] : '';
+    const tokenAmount = unitCount ? `${unitCount} وحدة ${networkName}` : name;
+
+    return {
+      tokenAmount,
+      badgeLabel: `رصيد ${networkName}`,
+      subTitle: `تعبئة رصيد وحدات ${networkName} فوري`,
+      isSpecialVIP: false,
+    };
+  }
+
   const isSpecialVIP = /vip/i.test(name) || /pass/i.test(name) || /عضوية/i.test(name);
 
   // Pattern 1: Token patterns like "230K VIP", "50,000 Tokens", "100 + 10 Diamonds", "1000 CP", "5000 كاش"

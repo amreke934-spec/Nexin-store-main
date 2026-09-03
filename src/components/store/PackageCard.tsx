@@ -1,5 +1,5 @@
 import React from 'react';
-import { Zap, ShoppingCart, Wallet, ArrowLeft, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Zap, ShoppingCart, Wallet, Phone, ArrowLeft, Sparkles, CheckCircle2 } from 'lucide-react';
 import { Product } from '../../types';
 import { getProductServiceType } from '../../utils/productUtils';
 import { extractGiftCardDetails } from '../../utils/giftCardUtils';
@@ -13,6 +13,11 @@ interface PackageCardProps {
 export const PackageCard: React.FC<PackageCardProps> = React.memo(({ product, onSelect }) => {
   const serviceType = getProductServiceType(product);
   const isCash = serviceType === 'cash' || product.isCash;
+  const isTelecom =
+    serviceType === 'telecom' ||
+    product.sectionKey === 'mtn' ||
+    product.sectionKey === 'syriatel' ||
+    product.category?.includes('وحدات');
   const giftDetails = extractGiftCardDetails(product);
 
   const displayPrice = getProductDisplayPrice(product.price, product.currency || 'USD');
@@ -23,6 +28,8 @@ export const PackageCard: React.FC<PackageCardProps> = React.memo(({ product, on
       className={`group relative overflow-hidden rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 md:p-4 flex flex-col justify-between hover:shadow-2xl transition-all duration-200 active:scale-98 cursor-pointer select-none text-white min-h-[145px] sm:min-h-[165px] ${
         isCash
           ? 'bg-gradient-to-br from-[#082419] via-[#051810] to-[#020b08] border border-emerald-900/50 hover:border-emerald-400/60 hover:shadow-emerald-950/30'
+          : isTelecom
+          ? 'bg-gradient-to-br from-[#1a140a] via-[#140e06] to-[#0a0703] border border-amber-900/40 hover:border-amber-400/60 hover:shadow-amber-950/30'
           : 'bg-gradient-to-br from-[#0d1c3e] via-[#09152f] to-[#040a17] border border-sky-900/40 hover:border-sky-400/60 hover:shadow-sky-950/30'
       }`}
     >
@@ -53,7 +60,9 @@ export const PackageCard: React.FC<PackageCardProps> = React.memo(({ product, on
             <span className="text-[9.5px] sm:text-[10.5px] md:text-[11px] font-black text-white block tracking-tight truncate">
               {product.gameName || product.category}
             </span>
-            <span className="text-[8px] sm:text-[9px] font-bold text-sky-300 block truncate">
+            <span className={`text-[8px] sm:text-[9px] font-bold block truncate ${
+              isTelecom ? 'text-amber-300' : 'text-sky-300'
+            }`}>
               {giftDetails.badgeLabel}
             </span>
           </div>
@@ -84,7 +93,9 @@ export const PackageCard: React.FC<PackageCardProps> = React.memo(({ product, on
             <span className="text-xs sm:text-sm md:text-base font-black text-white font-mono leading-none">
               {displayPrice.formattedNumber}
             </span>
-            <span className="text-[7.5px] sm:text-[9px] md:text-[10px] font-bold text-sky-300">
+            <span className={`text-[7.5px] sm:text-[9px] md:text-[10px] font-bold ${
+              isTelecom ? 'text-amber-300' : 'text-sky-300'
+            }`}>
               {displayPrice.currencySymbol}
             </span>
           </div>
@@ -100,11 +111,19 @@ export const PackageCard: React.FC<PackageCardProps> = React.memo(({ product, on
           className={`flex items-center gap-1 active:scale-95 text-white text-[8.5px] sm:text-[10px] md:text-xs font-bold px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl transition-all shadow-xs cursor-pointer shrink-0 ${
             isCash
               ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'
+              : isTelecom
+              ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/25'
               : 'bg-sky-500 hover:bg-sky-600 shadow-sky-500/25'
           }`}
         >
-          {isCash ? <Wallet className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> : <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-white" />}
-          <span>{isCash ? 'تحويل' : 'شحن'}</span>
+          {isCash ? (
+            <Wallet className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+          ) : isTelecom ? (
+            <Phone className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+          ) : (
+            <Zap className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-white" />
+          )}
+          <span>{isCash ? 'تحويل' : isTelecom ? 'تعبئة' : 'شحن'}</span>
           <ArrowLeft className="w-2.5 h-2.5 sm:w-3 sm:h-3 group-hover:-translate-x-0.5 transition-transform" />
         </button>
       </div>

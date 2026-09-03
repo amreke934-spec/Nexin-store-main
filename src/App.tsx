@@ -88,6 +88,21 @@ export default function App() {
   const [selectedProductForOrder, setSelectedProductForOrder] = useState<Product | null>(null);
   const [selectedOrderOptions, setSelectedOrderOptions] = useState<OrderOptions | null>(null);
 
+  // Profit Margin Version for immediate storefront price reactivity
+  const [profitMarginVersion, setProfitMarginVersion] = useState(0);
+
+  useEffect(() => {
+    const onProfitChanged = () => {
+      setProfitMarginVersion((v) => v + 1);
+    };
+    window.addEventListener('nexen-profit-margin-changed', onProfitChanged);
+    window.addEventListener('storage', onProfitChanged);
+    return () => {
+      window.removeEventListener('nexen-profit-margin-changed', onProfitChanged);
+      window.removeEventListener('storage', onProfitChanged);
+    };
+  }, []);
+
   // Save auth state to localStorage
   useEffect(() => {
     if (currentUser) {
@@ -374,6 +389,7 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-8 py-6 sm:py-8 pb-28 sm:pb-32">
         {activeTab === 'products' ? (
           <ProductGrid
+            key={`products-grid-${profitMarginVersion}`}
             products={products}
             isLoading={isLoadingProducts}
             error={productsError}

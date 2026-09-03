@@ -44,7 +44,7 @@ export function setExchangeRate(newRate: number): void {
 
 /**
  * Converts any amount to Syrian Pounds (SYP).
- * If the currency is already SYP, it returns the amount as is.
+ * Applies the dashboard profit margin percentage on top of the original supplier price.
  */
 export function convertToSyp(
   amount: number,
@@ -55,7 +55,8 @@ export function convertToSyp(
   if (typeof amount !== 'number' || isNaN(amount)) return 0;
   const curr = (currency || 'USD').trim().toUpperCase();
 
-  const adjustedAmount = applyMargin && curr === 'USD' ? calculateRetailPrice(amount) : amount;
+  // Apply dashboard profit margin percentage on top of original supplier price
+  const adjustedAmount = applyMargin ? calculateRetailPrice(amount) : amount;
 
   if (curr === 'SYP' || curr === 'ل.س' || curr === 'SP') {
     return adjustedAmount;
@@ -109,8 +110,7 @@ export function getProductDisplayPrice(
   currencySymbol: string;
   retailUsdPrice: number;
 } {
-  const isUsd = (currency || 'USD').toUpperCase() === 'USD';
-  const retailUsd = isUsd && applyMargin ? calculateRetailPrice(price) : price;
+  const retailPrice = applyMargin ? calculateRetailPrice(price) : price;
   const sypAmount = convertToSyp(price, currency, rate, applyMargin);
   const formattedNumber = formatSypNumber(sypAmount);
 
@@ -118,7 +118,7 @@ export function getProductDisplayPrice(
     sypAmount,
     formattedNumber,
     currencySymbol: 'ل.س',
-    retailUsdPrice: retailUsd,
+    retailUsdPrice: retailPrice,
   };
 }
 

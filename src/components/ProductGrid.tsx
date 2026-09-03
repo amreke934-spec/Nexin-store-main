@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { 
   Search, 
   AlertCircle, 
@@ -55,10 +55,16 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
 
   const handleSelectCategory = useCallback((categoryName: string) => {
     setSelectedCategory(categoryName);
-    setSelectedGame(null);
+    const catProducts = products.filter((p) => (p.category || 'أخرى') === categoryName);
+    const uniqueGames = Array.from(new Set(catProducts.map((p) => p.gameName || p.name || 'عام')));
+    if (uniqueGames.length === 1) {
+      setSelectedGame(uniqueGames[0]);
+    } else {
+      setSelectedGame(null);
+    }
     setSearchQuery('');
     scrollToTop();
-  }, [scrollToTop]);
+  }, [products, scrollToTop]);
 
   const handleSelectGame = useCallback((gameName: string) => {
     setSelectedGame(gameName);
@@ -67,10 +73,22 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
   }, [scrollToTop]);
 
   const handleNavigateBackToCategory = useCallback(() => {
-    setSelectedGame(null);
+    if (!selectedCategory) {
+      setSelectedCategory(null);
+      setSelectedGame(null);
+      return;
+    }
+    const catProducts = products.filter((p) => (p.category || 'أخرى') === selectedCategory);
+    const uniqueGames = Array.from(new Set(catProducts.map((p) => p.gameName || p.name || 'عام')));
+    if (uniqueGames.length <= 1) {
+      setSelectedCategory(null);
+      setSelectedGame(null);
+    } else {
+      setSelectedGame(null);
+    }
     setSearchQuery('');
     scrollToTop();
-  }, [scrollToTop]);
+  }, [selectedCategory, products, scrollToTop]);
 
   // 1. Group products by Category (Tier 1 Data)
   const categoriesData = useMemo(() => {
@@ -160,6 +178,13 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
 
     return list;
   }, [products, selectedCategory, searchQuery]);
+
+  // Auto-transition to packages if category contains only 1 game (like Syriatel or MTN)
+  useEffect(() => {
+    if (selectedCategory && !selectedGame && gamesInCategory.length === 1) {
+      setSelectedGame(gamesInCategory[0].gameName);
+    }
+  }, [selectedCategory, selectedGame, gamesInCategory]);
 
   // 3. Packages for selected Game (Tier 3 Data)
   const packagesInGame = useMemo<Product[]>(() => {

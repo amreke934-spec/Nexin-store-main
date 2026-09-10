@@ -1,7 +1,7 @@
 import { MerchantInfo, Product, CreateOrderPayload, DynamicFieldConfig, OrderItem } from '../types';
 import { getProductServiceType } from '../utils/productUtils';
 
-export const DEFAULT_API_KEY = 'sc_xIfrLuz7-N0HT-8xsM-zwg6-iLbNBrEhKag2';
+export const DEFAULT_API_KEY = 'sc_c2zhyaCv-3FtC-H7ds-XNLD-6ndNSUaZIpdf';
 
 // Helper to assign reliable real SC Store icons for products and games
 export const getGameCover = (gameName: string, category: string, rawImage?: string): string => {
@@ -250,7 +250,7 @@ export function formatCurrencyDisplay(amount: number, currency: string = 'USD'):
 
 /**
  * 1. Fetch Merchant Profile and Account Balance from real API (GET https://sc-store.top/api/v1/me)
- * Header: X-Api-Key: sc_xIfrLuz7-N0HT-8xsM-zwg6-iLbNBrEhKag2
+ * Header: X-Api-Key: sc_c2zhyaCv-3FtC-H7ds-XNLD-6ndNSUaZIpdf
  */
 export async function fetchMerchantInfo(apiKey?: string): Promise<{ data: MerchantInfo | null; error?: string; raw?: any }> {
   try {
@@ -787,26 +787,6 @@ export async function getScApiKeyStatus(): Promise<{
     return data;
   } catch {
     return { hasCustomKey: false, isDefault: true, maskedKey: 'غير متوفر', keyLength: 0, prefix: '', allowManualOrders: false };
-  }
-}
-
-/**
- * Update Manual Orders Fallback Setting
- */
-export async function updateManualOrdersSetting(enabled: boolean): Promise<{
-  success: boolean;
-  allowManualOrders: boolean;
-  message?: string;
-}> {
-  try {
-    const res = await fetch('/api/sc/settings/manual-orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-    });
-    return await res.json();
-  } catch (e: any) {
-    return { success: false, allowManualOrders: false, message: e.message };
   }
 }
 

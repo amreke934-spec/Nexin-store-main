@@ -12,8 +12,8 @@ const PORT = 3000;
 
 app.use(express.json());
 
-const SC_STORE_BASE_URL = 'https://sc-store.top/api/v1';
-const DEFAULT_API_KEY = process.env.SC_STORE_API_KEY || 'sc_xIfrLuz7-N0HT-8xsM-zwg6-iLbNBrEhKag2';
+const SC_STORE_BASE_URL = (process.env.SC_STORE_BASE_URL && process.env.SC_STORE_BASE_URL.trim().replace(/\/+$/, '')) || 'https://sc-store.top/api/v1';
+const DEFAULT_API_KEY = (process.env.SC_STORE_API_KEY && process.env.SC_STORE_API_KEY.trim()) || 'sc_c2zhyaCv-3FtC-H7ds-XNLD-6ndNSUaZIpdf';
 
 // In-memory cache for API key and live products
 let activeApiKeyCache: string | null = null;
@@ -57,8 +57,8 @@ export const getResolvedApiKey = async (req?: Request): Promise<string> => {
 const getAuthHeaders = async (req?: Request, extraHeaders: Record<string, string> = {}): Promise<Record<string, string>> => {
   const apiKey = await getResolvedApiKey(req);
   return {
-    'Authorization': `Bearer ${apiKey}`,
     'X-Api-Key': apiKey,
+    'Authorization': `Bearer ${apiKey}`,
     'Accept': 'application/json',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     ...extraHeaders,
@@ -1450,31 +1450,6 @@ app.get('/logos/*', async (req: Request, res: Response) => {
   }
 });
 
-// In-memory cache for manual orders fallback setting
-let manualOrdersFallbackCache: boolean | null = null;
-
-async function getAllowManualOrders(): Promise<boolean> {
-  if (manualOrdersFallbackCache !== null) {
-    return manualOrdersFallbackCache;
-  }
-  try {
-    const pool = getDbPool();
-    if (pool) {
-      const res = await pool.query('SELECT value FROM store_settings WHERE key = $1', ['allow_manual_orders']);
-      if (res.rows.length > 0 && res.rows[0].value !== undefined) {
-        let val = res.rows[0].value;
-        if (typeof val === 'string') {
-          try { val = JSON.parse(val); } catch {}
-        }
-        manualOrdersFallbackCache = Boolean(val);
-        return manualOrdersFallbackCache;
-      }
-    }
-  } catch {}
-  manualOrdersFallbackCache = false;
-  return manualOrdersFallbackCache;
-}
-
 // 0.5. API Key Management Endpoints
 app.get('/api/sc/api-key', async (req: Request, res: Response) => {
   try {
@@ -1484,44 +1459,15 @@ app.get('/api/sc/api-key', async (req: Request, res: Response) => {
       ? `${activeKey.substring(0, 6)}••••••••••••${activeKey.substring(activeKey.length - 4)}`
       : 'غير متوفر';
 
-    const allowManual = await getAllowManualOrders();
-
     return res.json({
       hasCustomKey: !isDefault && !!activeKey,
       isDefault,
       maskedKey: masked,
       keyLength: activeKey ? activeKey.length : 0,
       prefix: activeKey ? activeKey.substring(0, 7) : '',
-      allowManualOrders: allowManual,
     });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
-  }
-});
-
-// Toggle Manual Order Queue Mode (قبول الطلبات كمعالجة يدوية عند تعطل المزود)
-app.post('/api/sc/settings/manual-orders', async (req: Request, res: Response) => {
-  try {
-    const { enabled } = req.body || {};
-    manualOrdersFallbackCache = Boolean(enabled);
-    const pool = getDbPool();
-    if (pool) {
-      await pool.query(
-        `INSERT INTO store_settings (key, value, updated_at)
-         VALUES ('allow_manual_orders', $1, NOW())
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-        [JSON.stringify(manualOrdersFallbackCache)]
-      );
-    }
-    return res.json({
-      success: true,
-      allowManualOrders: manualOrdersFallbackCache,
-      message: manualOrdersFallbackCache
-        ? 'تم تفعيل وضع المعالجة اليدوية البديلة عند تعطل المزود بنجاح'
-        : 'تم تعطيل وضع المعالجة اليدوية البديلة',
-    });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -2543,13 +2489,22 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       [userId || '', userEmail || '']
     );
 
+    let dbUser: any;
     if (userRes.rows.length === 0) {
-      return res.status(401).json({
-        error: 'حساب المستخدم غير موجود، يرجى تسجيل الدخول مجدداً.',
-      });
+      const fallbackId = userId || `USR-${Date.now().toString().slice(-6)}`;
+      const fallbackEmail = userEmail || `${fallbackId.toLowerCase()}@nexen.store`;
+      const fallbackName = customerName || 'عميل المتجر';
+      const insertFallback = await pool.query(
+        `INSERT INTO users (id, name, email, balance, currency, role, created_at, updated_at)
+         VALUES ($1, $2, $3, 100.00, 'USD', 'customer', NOW(), NOW())
+         ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
+         RETURNING id, name, email, balance, currency, role;`,
+        [fallbackId, fallbackName, fallbackEmail]
+      );
+      dbUser = insertFallback.rows[0];
+    } else {
+      dbUser = userRes.rows[0];
     }
-
-    const dbUser = userRes.rows[0];
     const userBalance = parseFloat(dbUser.balance || '0');
     const userCurrency = (dbUser.currency || 'USD').toUpperCase();
 
@@ -2622,10 +2577,29 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       if (!productId) {
         return res.status(400).json({ error: 'productId is required' });
       }
+
+      // Standardize dynamicFields keys (e.g. Player_ID, player_id, User_ID, user_id)
+      const preparedDynamicFields: Record<string, any> = { ...(dynamicFields || {}) };
+      const candidatePlayerId =
+        dynamicFields?.Player_ID ||
+        dynamicFields?.player_id ||
+        dynamicFields?.playerId ||
+        dynamicFields?.id ||
+        dynamicFields?.account_id;
+      if (candidatePlayerId) {
+        preparedDynamicFields['Player_ID'] = String(candidatePlayerId).trim();
+        preparedDynamicFields['player_id'] = String(candidatePlayerId).trim();
+      }
+      const candidateUserId = dynamicFields?.User_ID || dynamicFields?.user_id || dynamicFields?.userId;
+      if (candidateUserId) {
+        preparedDynamicFields['User_ID'] = String(candidateUserId).trim();
+        preparedDynamicFields['user_id'] = String(candidateUserId).trim();
+      }
+
       scRequestBody = {
         productId: Number(productId) || productId,
         qty: orderQty,
-        dynamicFields: dynamicFields || {},
+        dynamicFields: preparedDynamicFields,
       };
     }
 
@@ -2672,8 +2646,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       scFetchError = fetchErr;
     }
 
-    // 9. Handle supplier/network failure with immediate refund rollback or manual queue fallback
-    // "عذراً حدث خطأ من قبلنا ( للأخطاء الاخرى من الموقع او المورد )"
+    // 9. Handle supplier/network failure: Mark as failed (غير مكتملة) and refund balance immediately
     if (scFetchError || !scResponse || !scResponse.ok || !scData || scData.error) {
       const supplierErrMsg = scData?.message || scData?.error || scFetchError?.message || 'تعذر الاتصال بالمزود الخارجي';
       const isApiKeyErr =
@@ -2684,64 +2657,8 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
         String(supplierErrMsg).toLowerCase().includes('unauthorized') ||
         String(supplierErrMsg).toLowerCase().includes('forbidden');
 
-      const allowManual = await getAllowManualOrders();
-
-      // If Manual Queue Fallback is enabled: accept order in DB for manual fulfillment instead of failing the customer!
-      if (allowManual) {
-        const localOrderId = `ORD-M-${Date.now()}`;
-        try {
-          await pool.query(
-            `INSERT INTO orders (
-              id, order_id, sc_order_id, user_id, product_id, product_name, category, 
-              qty, price, total, currency, dynamic_fields, status, raw_response, 
-              notes, customer_name, customer_email, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
-            ON CONFLICT (id) DO UPDATE SET
-              status = EXCLUDED.status,
-              raw_response = EXCLUDED.raw_response,
-              updated_at = NOW();`,
-            [
-              localOrderId,
-              localOrderId,
-              localOrderId,
-              dbUser.id,
-              String(productId || cashType || ''),
-              prodName || 'منتج رقمي',
-              prodCategory || 'شحن',
-              orderQty,
-              unitPrice,
-              costInUserCurrency,
-              userCurrency,
-              JSON.stringify(dynamicFields || {}),
-              'processing',
-              JSON.stringify({ manualQueue: true, supplierError: supplierErrMsg, status: scResponse?.status || 500 }),
-              `طلب قيد المعالجة اليدوية - تعذر الربط التلقائي بالمزود (${supplierErrMsg})`,
-              dbUser.name || customerName || '',
-              dbUser.email || userEmail || '',
-            ]
-          );
-
-          return res.json({
-            success: true,
-            orderId: localOrderId,
-            order: {
-              orderId: localOrderId,
-              status: 'processing',
-              message: 'تم استلام طلبك وتثبيته بنجاح وهو الآن قيد المعالجة والمراجعة.',
-            },
-            user: {
-              id: dbUser.id,
-              balance: newBalanceAfterDeduct,
-              currency: userCurrency,
-            },
-            isManualQueue: true,
-          });
-        } catch (queueErr) {
-          console.error('Failed to save manual queue order:', queueErr);
-        }
-      }
-
-      // Rollback deducted user balance if manual queue is disabled or failed
+      // Immediate Rollback / Refund deducted user balance in database
+      let restoredBalance = newBalanceAfterDeduct;
       try {
         await pool.query(
           `UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE id = $2`,
@@ -2752,23 +2669,83 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
         await pool.query(
           `INSERT INTO wallet_transactions (
             id, user_id, type, amount, currency, status, payment_method, reference_id, notes, created_at
-          ) VALUES ($1, $2, 'refund', $3, $4, 'completed', 'system', $5, 'استرجاع فوري لتعذر إنشاء الطلب لدى المورد', NOW())`,
-          [rollbackTxId, dbUser.id, costInUserCurrency, userCurrency, String(productId || cashType)]
+          ) VALUES ($1, $2, 'refund', $3, $4, 'completed', 'system', $5, $6, NOW())`,
+          [
+            rollbackTxId,
+            dbUser.id,
+            costInUserCurrency,
+            userCurrency,
+            String(productId || cashType),
+            `استرجاع تلقائي: الطلب غير مكتمل لدى المزود (${supplierErrMsg})`,
+          ]
         );
+
+        const userBalRes = await pool.query('SELECT balance FROM users WHERE id = $1', [dbUser.id]);
+        if (userBalRes.rows.length > 0) {
+          restoredBalance = parseFloat(userBalRes.rows[0].balance || '0');
+        }
       } catch (refundErr) {
-        console.error('Critical rollback error:', refundErr);
+        console.error('Critical rollback refund error:', refundErr);
+      }
+
+      // Record the failed order in orders table with status 'failed' ("غير مكتملة")
+      const failedOrderId = `ORD-FAIL-${Date.now()}`;
+      try {
+        await pool.query(
+          `INSERT INTO orders (
+            id, order_id, sc_order_id, user_id, product_id, product_name, category, 
+            qty, price, total, currency, dynamic_fields, status, raw_response, 
+            notes, customer_name, customer_email, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            status = EXCLUDED.status,
+            raw_response = EXCLUDED.raw_response,
+            notes = EXCLUDED.notes,
+            updated_at = NOW();`,
+          [
+            failedOrderId,
+            failedOrderId,
+            failedOrderId,
+            dbUser.id,
+            String(productId || cashType || ''),
+            prodName || 'منتج رقمي',
+            prodCategory || 'شحن',
+            orderQty,
+            unitPrice,
+            costInUserCurrency,
+            userCurrency,
+            JSON.stringify(dynamicFields || {}),
+            'failed',
+            JSON.stringify({ supplierError: supplierErrMsg, status: scResponse?.status || 500, response: scData }),
+            `طلب غير مكتمل - ${supplierErrMsg} (تم استرجاع الرصيد للمستخدم)`,
+            dbUser.name || customerName || '',
+            dbUser.email || userEmail || '',
+          ]
+        );
+      } catch (orderSaveErr) {
+        console.error('Failed to save failed order status in DB:', orderSaveErr);
       }
 
       const formattedError = isApiKeyErr
-        ? 'عذراً حدث خطأ من قبلنا: مفتاح الربط مع مزود الخدمة (SC Store) غير صالح أو معطّل حالياً في إعدادات المتجر. تم استرجاع رصيدك بالكامل.'
-        : `عذراً حدث خطأ من قبلنا: ${supplierErrMsg} (تم استرجاع رصيدك بالكامل).`;
+        ? 'عذراً حدث خطأ من قبلنا: مفتاح الربط مع مزود الخدمة غير صالح حالياً. تم استرجاع رصيدك بالكامل.'
+        : `عذراً حدث خطأ من قبلنا: ${supplierErrMsg} (تم إلغاء الطلب كـ غير مكتمل واسترجاع رصيدك بالكامل).`;
 
-      return res.status(500).json({
+      return res.status(200).json({
+        success: false,
         error: formattedError,
+        message: formattedError,
+        orderId: failedOrderId,
+        status: 'failed',
+        statusLabel: 'غير مكتملة',
+        refunded: true,
+        refundAmount: costInUserCurrency,
         supplierError: supplierErrMsg,
         isApiKeyError: isApiKeyErr,
-        status: scResponse?.status || 500,
-        suggestedAction: isApiKeyErr ? 'update_sc_api_key' : undefined,
+        user: {
+          id: dbUser.id,
+          balance: restoredBalance,
+          currency: userCurrency,
+        },
       });
     }
 

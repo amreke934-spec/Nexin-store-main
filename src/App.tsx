@@ -265,11 +265,26 @@ export default function App() {
       }
     };
 
+    const handleBalanceUpdated = (e: any) => {
+      if (e?.detail?.balance !== undefined) {
+        setCurrentUser((prev) => (prev ? { ...prev, balance: e.detail.balance } : null));
+      } else if (currentUserRef.current?.id) {
+        fetchUserProfile(currentUserRef.current.id).then((fresh) => {
+          if (fresh) setCurrentUser(fresh);
+        });
+      }
+      if (currentUserRef.current?.id) {
+        refreshUserOrders(currentUserRef.current.id);
+      }
+    };
+
     window.addEventListener('nexen-products-synced', handleProductsSynced);
     window.addEventListener('nexen-maintenance-changed', handleMaintenanceSynced);
+    window.addEventListener('nexen-balance-updated', handleBalanceUpdated);
     return () => {
       window.removeEventListener('nexen-products-synced', handleProductsSynced);
       window.removeEventListener('nexen-maintenance-changed', handleMaintenanceSynced);
+      window.removeEventListener('nexen-balance-updated', handleBalanceUpdated);
     };
   }, [loadMerchantData, loadProductsData, refreshUserOrders]);
 

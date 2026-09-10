@@ -60,7 +60,6 @@ import { formatPriceSyp, getExchangeRate, convertToSyp, formatSypNumber } from '
 import {
   getScApiKeyStatus,
   updateScApiKey,
-  updateManualOrdersSetting,
   getScSyncSettings,
   saveScSyncSettings,
   triggerScSyncNow,
@@ -154,14 +153,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
     maskedKey: string;
     keyLength: number;
     prefix: string;
-    allowManualOrders?: boolean;
   } | null>(null);
   const [inputApiKey, setInputApiKey] = useState<string>('');
   const [isUpdatingApiKey, setIsUpdatingApiKey] = useState<boolean>(false);
   const [apiKeyFeedback, setApiKeyFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showApiKeyInput, setShowApiKeyInput] = useState<boolean>(false);
-  const [allowManualOrders, setAllowManualOrders] = useState<boolean>(false);
-  const [isTogglingManualOrders, setIsTogglingManualOrders] = useState<boolean>(false);
 
   // SC Store Product & Price Sync State
   const [syncSettings, setSyncSettings] = useState<SyncSettingsData | null>(null);
@@ -191,27 +187,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
     try {
       const st = await getScApiKeyStatus();
       setApiKeyStatus(st);
-      if (st && st.allowManualOrders !== undefined) {
-        setAllowManualOrders(st.allowManualOrders);
-      }
     } catch {}
   }, []);
-
-  // Toggle Manual Orders Fallback Handler
-  const handleToggleManualOrders = async () => {
-    const nextVal = !allowManualOrders;
-    setIsTogglingManualOrders(true);
-    try {
-      const res = await updateManualOrdersSetting(nextVal);
-      if (res.success) {
-        setAllowManualOrders(res.allowManualOrders);
-      }
-    } catch (e) {
-      console.error('Failed to toggle manual orders setting:', e);
-    } finally {
-      setIsTogglingManualOrders(false);
-    }
-  };
 
   // Load Sync Settings
   const loadSyncSettings = useCallback(async () => {
@@ -1424,41 +1401,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                   )}
                 </form>
               )}
-
-              {/* Manual Queue Fallback Mode Toggle */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#151221] border border-slate-200/80 dark:border-white/10 flex items-start justify-between flex-wrap gap-4">
-                <div className="space-y-1 max-w-xl">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
-                      وضع قبول الطلبات كـ «معالجة يدوية» عند تعطل المزود
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                      allowManualOrders
-                        ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
-                        : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                    }`}>
-                      {allowManualOrders ? 'مفعّل' : 'معطّل'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                    عند تفعيل هذا الخيار: إذا كان مفتاح الربط معطلاً أو توقف خادم المزود، لن تظهر رسالة خطأ للزبون، بل يتم قبول الطلب وخصم الرصيد وتثبيته كـ «قيد المعالجة» في لوحة التحكم لتتمكن من تنفيذه يدوياً دون توقف عمل متجرك.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleToggleManualOrders}
-                  disabled={isTogglingManualOrders}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-xs shrink-0 ${
-                    allowManualOrders
-                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                      : 'bg-slate-200 hover:bg-slate-300 dark:bg-white/10 dark:hover:bg-white/15 text-slate-800 dark:text-slate-200'
-                  }`}
-                >
-                  {isTogglingManualOrders && <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />}
-                  <span>{allowManualOrders ? 'تعطيل الوضع اليدوي' : 'تفعيل الوضع اليدوي الآن'}</span>
-                </button>
-              </div>
             </div>
           </div>
         </div>

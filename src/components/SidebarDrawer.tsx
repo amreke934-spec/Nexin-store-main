@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { CustomerUser, MerchantInfo } from '../types';
 import { NexenLogo } from './NexenLogo';
-import { ADMIN_AUTHORIZED_EMAIL } from './AdminDashboard';
+import { isUserAdmin } from '../utils/adminUtils';
 import { formatCurrencyDisplay } from '../services/scStoreApi';
 
 interface SidebarDrawerProps {
@@ -37,6 +37,7 @@ interface SidebarDrawerProps {
   theme: 'light' | 'dark';
   onToggleTheme: (theme: 'light' | 'dark') => void;
   ordersCount: number;
+  isMaintenanceActive?: boolean;
 }
 
 export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
@@ -54,6 +55,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
   theme,
   onToggleTheme,
   ordersCount,
+  isMaintenanceActive = false,
 }) => {
   // Prevent body scroll when drawer is open
   useEffect(() => {
@@ -69,13 +71,17 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
 
   if (!isOpen) return null;
 
-  const isAdmin = currentUser?.email === ADMIN_AUTHORIZED_EMAIL;
+  const isAdmin = isUserAdmin(currentUser);
   const activeBalance = currentUser?.balance !== undefined 
     ? currentUser.balance 
-    : (merchantInfo?.balance ?? 0);
-  const activeCurrency = currentUser?.currency || merchantInfo?.currency || 'USD';
+    : 0;
+  const activeCurrency = currentUser?.currency || 'USD';
 
   const handleNavClick = (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about') => {
+    if (isMaintenanceActive && !isAdmin && (tab === 'orders' || tab === 'settings')) {
+      alert('الموقع في وضع الصيانة حالياً - الإجراءات متوقفة مؤقتاً.');
+      return;
+    }
     onNavigate(tab);
     onClose();
   };
@@ -213,13 +219,21 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
                     type="button"
                     id="sidebar-deposit-btn"
                     onClick={() => {
+                      if (isMaintenanceActive && !isAdmin) {
+                        alert('الموقع في وضع الصيانة حالياً - عمليات الإيداع متوقفة مؤقتاً.');
+                        return;
+                      }
                       onOpenDeposit();
                       onClose();
                     }}
-                    className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#7F00FF] hover:brightness-110 active:scale-98 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer"
+                    className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer ${
+                      isMaintenanceActive && !isAdmin
+                        ? 'bg-slate-700 opacity-60 text-slate-300'
+                        : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-[#7F00FF] hover:brightness-110 active:scale-98 text-white shadow-emerald-600/20'
+                    }`}
                   >
-                    <Wallet className="w-4 h-4" />
-                    <span>إيداع وشحن الرصيد</span>
+                    {isMaintenanceActive && !isAdmin ? <Lock className="w-4 h-4 text-amber-400" /> : <Wallet className="w-4 h-4" />}
+                    <span>{isMaintenanceActive && !isAdmin ? 'الإيداع متوقف (صيانة)' : 'إيداع وشحن الرصيد'}</span>
                   </button>
                 )}
               </div>
@@ -237,17 +251,33 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
                   type="button"
                   id="sidebar-nav-deposit-btn"
                   onClick={() => {
+                    if (isMaintenanceActive && !isAdmin) {
+                      alert('الموقع في وضع الصيانة حالياً - عمليات الإيداع متوقفة مؤقتاً.');
+                      return;
+                    }
                     onOpenDeposit();
                     onClose();
                   }}
-                  className="w-full flex items-center justify-between p-3 rounded-xl text-xs font-bold transition-all cursor-pointer bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 text-emerald-800 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/40 hover:brightness-105"
+                  className={`w-full flex items-center justify-between p-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    isMaintenanceActive && !isAdmin
+                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 opacity-60'
+                      : 'bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 text-emerald-800 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/40 hover:brightness-105'
+                  }`}
                 >
                   <div className="flex items-center gap-2.5">
-                    <Wallet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    {isMaintenanceActive && !isAdmin ? (
+                      <Lock className="w-4 h-4 text-amber-500" />
+                    ) : (
+                      <Wallet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    )}
                     <span>إيداع وشحن المحفظة</span>
                   </div>
-                  <span className="text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-bold">
-                    إيداع
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                    isMaintenanceActive && !isAdmin
+                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                      : 'bg-emerald-500 text-white'
+                  }`}>
+                    {isMaintenanceActive && !isAdmin ? 'مغلق' : 'فوري'}
                   </span>
                 </button>
               )}

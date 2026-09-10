@@ -188,31 +188,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           setIsLoading(false);
           onLoginSuccess(res.user, res.orders);
         } else {
-          // Fallback creation
-          const fallbackUser: CustomerUser = {
-            id: `USR-${Date.now().toString().slice(-6)}`,
-            name: name.trim(),
-            email: trimmedEmail,
-            phone: fullPhoneNumber,
-            apiKey: DEFAULT_API_KEY,
-            role: 'customer',
-            createdAt: new Date().toISOString(),
-          };
           setIsLoading(false);
-          onLoginSuccess(fallbackUser);
+          setError(res.error || 'تعذر تسجيل الحساب في قاعدة البيانات، يرجى المحاولة مجدداً');
         }
-      } catch {
-        const fallbackUser: CustomerUser = {
-          id: `USR-${Date.now().toString().slice(-6)}`,
-          name: name.trim(),
-          email: trimmedEmail,
-          phone: fullPhoneNumber,
-          apiKey: DEFAULT_API_KEY,
-          role: 'customer',
-          createdAt: new Date().toISOString(),
-        };
+      } catch (err: any) {
         setIsLoading(false);
-        onLoginSuccess(fallbackUser);
+        setError(err.message || 'فشل الاتصال بقاعدة البيانات لإنشاء الحساب');
       }
 
     } else {
@@ -235,72 +216,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           setIsLoading(false);
           onLoginSuccess(res.user, res.orders);
         } else {
-          const isEmail = trimmedIdentifier.includes('@');
-          const fallbackUser: CustomerUser = {
-            id: `USR-${Date.now().toString().slice(-6)}`,
-            name: isEmail ? trimmedIdentifier.split('@')[0] : `مستخدم ${trimmedIdentifier.slice(-4)}`,
-            email: isEmail ? trimmedIdentifier : `${trimmedIdentifier.replace(/\s+/g, '')}@nexenstore.com`,
-            phone: !isEmail ? trimmedIdentifier : undefined,
-            apiKey: DEFAULT_API_KEY,
-            role: 'customer',
-            createdAt: new Date().toISOString(),
-          };
           setIsLoading(false);
-          onLoginSuccess(fallbackUser);
+          setError(res.error || 'بيانات الدخول غير صحيحة أو الحساب غير مسجل في قاعدة البيانات');
         }
-      } catch {
-        const isEmail = trimmedIdentifier.includes('@');
-        const fallbackUser: CustomerUser = {
-          id: `USR-${Date.now().toString().slice(-6)}`,
-          name: isEmail ? trimmedIdentifier.split('@')[0] : `مستخدم ${trimmedIdentifier.slice(-4)}`,
-          email: isEmail ? trimmedIdentifier : `${trimmedIdentifier.replace(/\s+/g, '')}@nexenstore.com`,
-          phone: !isEmail ? trimmedIdentifier : undefined,
-          apiKey: DEFAULT_API_KEY,
-          role: 'customer',
-          createdAt: new Date().toISOString(),
-        };
+      } catch (err: any) {
         setIsLoading(false);
-        onLoginSuccess(fallbackUser);
+        setError(err.message || 'فشل الاتصال بقاعدة البيانات للتحقق من الحساب');
       }
-    }
-  };
-
-  // Quick 1-click test account fill
-  const handleQuickDemoLogin = async () => {
-    setIsLoading(true);
-    try {
-      const res = await registerUserInDb({
-        name: 'أحمد المحمد (حساب تجريبي)',
-        email: 'ahmad.demo@nexenstore.com',
-        phone: '+963 944 123 456',
-      });
-      setIsLoading(false);
-      if (res.success && res.user) {
-        onLoginSuccess(res.user, res.orders);
-      } else {
-        const demoUser: CustomerUser = {
-          id: `USR-${Math.floor(100000 + Math.random() * 900000)}`,
-          name: 'أحمد المحمد (حساب تجريبي)',
-          email: 'ahmad.demo@nexenstore.com',
-          phone: '+963 944 123 456',
-          apiKey: DEFAULT_API_KEY,
-          role: 'customer',
-          createdAt: new Date().toISOString(),
-        };
-        onLoginSuccess(demoUser);
-      }
-    } catch {
-      const demoUser: CustomerUser = {
-        id: `USR-${Math.floor(100000 + Math.random() * 900000)}`,
-        name: 'أحمد المحمد (حساب تجريبي)',
-        email: 'ahmad.demo@nexenstore.com',
-        phone: '+963 944 123 456',
-        apiKey: DEFAULT_API_KEY,
-        role: 'customer',
-        createdAt: new Date().toISOString(),
-      };
-      setIsLoading(false);
-      onLoginSuccess(demoUser);
     }
   };
 
@@ -643,20 +565,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               )}
             </button>
           </form>
-
-          {/* Quick Demo Login Option */}
-          <div className="mt-5 pt-5 border-t border-slate-200/80 dark:border-slate-800 flex flex-col items-center gap-3">
-            <button
-              type="button"
-              id="auth-quick-demo-btn"
-              onClick={handleQuickDemoLogin}
-              disabled={isLoading}
-              className="text-xs font-bold text-[#7F00FF] dark:text-purple-400 hover:text-[#6b00d6] dark:hover:text-purple-300 flex items-center gap-1.5 cursor-pointer py-1 px-3 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-950/50 transition-colors"
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-              <span>دخول سريع بحساب تجريبي (ضغطة واحدة)</span>
-            </button>
-          </div>
 
           {/* Trust and Privacy Guarantee Badges */}
           <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800/60 grid grid-cols-2 gap-2 text-center text-[11px] text-slate-500 dark:text-slate-400">

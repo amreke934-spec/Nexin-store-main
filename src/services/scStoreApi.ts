@@ -544,7 +544,18 @@ export async function fetchProducts(apiKey?: string): Promise<FetchProductsResul
 export async function createNewOrder(
   payload: CreateOrderPayload,
   apiKey?: string
-): Promise<{ success: boolean; data?: any; error?: string; orderId?: string }> {
+): Promise<{
+  success: boolean;
+  data?: any;
+  error?: string;
+  supplierError?: string;
+  isApiKeyError?: boolean;
+  suggestedAction?: string;
+  isManualQueue?: boolean;
+  orderId?: string;
+  user?: { id: string; balance: number; currency: string };
+  isDuplicate?: boolean;
+}> {
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -573,13 +584,19 @@ export async function createNewOrder(
         success: true,
         data: json,
         orderId: String(orderId),
+        user: json.user,
+        isManualQueue: !!json.isManualQueue,
       };
     } else {
-      const errorMsg = json?.message || json?.error || `فشل إنشاء الطلب (كود الرد: ${res.status})`;
+      const errorMsg = json?.error || json?.message || `فشل إنشاء الطلب (كود الرد: ${res.status})`;
       return {
         success: false,
         error: errorMsg,
+        supplierError: json?.supplierError,
+        isApiKeyError: !!json?.isApiKeyError,
+        suggestedAction: json?.suggestedAction,
         data: json,
+        isDuplicate: !!json?.isDuplicate,
       };
     }
   } catch (err: any) {
@@ -762,13 +779,34 @@ export async function getScApiKeyStatus(): Promise<{
   maskedKey: string;
   keyLength: number;
   prefix: string;
+  allowManualOrders?: boolean;
 }> {
   try {
     const res = await fetch('/api/sc/api-key');
     const data = await res.json();
     return data;
   } catch {
-    return { hasCustomKey: false, isDefault: true, maskedKey: 'غير متوفر', keyLength: 0, prefix: '' };
+    return { hasCustomKey: false, isDefault: true, maskedKey: 'غير متوفر', keyLength: 0, prefix: '', allowManualOrders: false };
+  }
+}
+
+/**
+ * Update Manual Orders Fallback Setting
+ */
+export async function updateManualOrdersSetting(enabled: boolean): Promise<{
+  success: boolean;
+  allowManualOrders: boolean;
+  message?: string;
+}> {
+  try {
+    const res = await fetch('/api/sc/settings/manual-orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, allowManualOrders: false, message: e.message };
   }
 }
 

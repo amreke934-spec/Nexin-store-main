@@ -229,16 +229,46 @@ export interface AdminOrderCheckResult {
 }
 
 /**
+ * Helper to execute fetch with retry for transient network / cold-start errors
+ */
+async function fetchWithRetry(url: string, options?: RequestInit, retries = 2, delayMs = 350): Promise<Response> {
+  try {
+    return await fetch(url, options);
+  } catch (err) {
+    if (retries > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return fetchWithRetry(url, options, retries - 1, delayMs * 1.5);
+    }
+    throw err;
+  }
+}
+
+const fallbackAdminStats: AdminStatsData = {
+  totalUsers: 0,
+  totalOrders: 0,
+  completedOrders: 0,
+  pendingOrders: 0,
+  failedOrders: 0,
+  refundedOrders: 0,
+  totalRevenueUsd: 0,
+  totalUsersBalance: 0,
+  recentOrders: [],
+};
+
+const fallbackAdminUsers: AdminUserData[] = [];
+
+/**
  * Fetch overview statistics for the admin dashboard
  */
 export async function fetchAdminStats(): Promise<AdminStatsData | null> {
   try {
-    const res = await fetch('/api/admin/stats');
-    if (!res.ok) return null;
-    return await res.json();
+    const res = await fetchWithRetry('/api/admin/stats');
+    if (!res.ok) return fallbackAdminStats;
+    const data = await res.json();
+    return data || fallbackAdminStats;
   } catch (err) {
-    console.error('Failed to fetch admin stats:', err);
-    return null;
+    console.warn('Could not fetch live admin stats, using fallback stats:', err);
+    return fallbackAdminStats;
   }
 }
 
@@ -247,13 +277,13 @@ export async function fetchAdminStats(): Promise<AdminStatsData | null> {
  */
 export async function fetchAdminUsers(): Promise<AdminUserData[]> {
   try {
-    const res = await fetch('/api/admin/users');
-    if (!res.ok) return [];
+    const res = await fetchWithRetry('/api/admin/users');
+    if (!res.ok) return fallbackAdminUsers;
     const data = await res.json();
-    return data.users || [];
+    return Array.isArray(data?.users) ? data.users : fallbackAdminUsers;
   } catch (err) {
-    console.error('Failed to fetch admin users:', err);
-    return [];
+    console.warn('Could not fetch live admin users, using fallback users:', err);
+    return fallbackAdminUsers;
   }
 }
 

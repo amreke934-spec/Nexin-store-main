@@ -59,12 +59,14 @@ const CATEGORY_VISUALS: Record<string, {
   'وحدات سيريتل': {
     icon: Smartphone,
     image: 'https://sc-store.top/logos/syriatel.png',
-    shortSubtitle: 'تعبئة وحدات فورية',
+    badge: 'تحويل رصيد',
+    shortSubtitle: 'تحويل رصيد وحدات',
   },
   'وحدات MTN': {
     icon: Radio,
     image: 'https://sc-store.top/logos/mtn.png',
-    shortSubtitle: 'تعبئة وحدات فورية',
+    badge: 'تحويل رصيد',
+    shortSubtitle: 'تحويل رصيد وحدات',
   },
 };
 

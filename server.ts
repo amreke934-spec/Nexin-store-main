@@ -1010,17 +1010,28 @@ app.put('/api/deposit-requests/:id/status', async (req: Request, res: Response) 
     }
 
     // Update deposit request
-    const updateRes = await pool.query(
-      `UPDATE deposit_requests SET
-        status = $1,
-        rejection_reason = $2,
-        approved_at = CASE WHEN $1 = 'approved' THEN NOW() ELSE approved_at END,
-        approved_by = CASE WHEN $1 = 'approved' THEN $3 ELSE approved_by END,
-        updated_at = NOW()
-       WHERE id = $4
-       RETURNING *;`,
-      [status, rejectionReason || null, adminEmail || 'Admin', id]
-    );
+    const isApproved = status === 'approved';
+    const updateRes = isApproved
+      ? await pool.query(
+          `UPDATE deposit_requests SET
+            status = $1,
+            rejection_reason = $2,
+            approved_at = NOW(),
+            approved_by = $3,
+            updated_at = NOW()
+           WHERE id = $4
+           RETURNING *;`,
+          ['approved', rejectionReason || null, adminEmail || 'Admin', id]
+        )
+      : await pool.query(
+          `UPDATE deposit_requests SET
+            status = $1,
+            rejection_reason = $2,
+            updated_at = NOW()
+           WHERE id = $3
+           RETURNING *;`,
+          [status, rejectionReason || null, id]
+        );
 
     return res.json({
       success: true,
@@ -1043,11 +1054,12 @@ app.get('/api/admin/stats', async (_req: Request, res: Response) => {
     const pool = getDbPool();
     if (!pool) {
       return res.json({
-        totalUsers: 1,
+        totalUsers: 0,
         totalOrders: 0,
         completedOrders: 0,
         pendingOrders: 0,
         failedOrders: 0,
+        refundedOrders: 0,
         totalRevenueUsd: 0,
         totalUsersBalance: 0,
         recentOrders: [],
@@ -1097,8 +1109,18 @@ app.get('/api/admin/stats', async (_req: Request, res: Response) => {
       recentOrders: recentOrdersRes.rows.map(mapDbOrderToOrderItem),
     });
   } catch (err: any) {
-    console.error('Error in /api/admin/stats:', err);
-    return res.status(500).json({ error: err.message });
+    console.warn('Warning in /api/admin/stats, serving fallback stats:', err.message);
+    return res.json({
+      totalUsers: 0,
+      totalOrders: 0,
+      completedOrders: 0,
+      pendingOrders: 0,
+      failedOrders: 0,
+      refundedOrders: 0,
+      totalRevenueUsd: 0,
+      totalUsersBalance: 0,
+      recentOrders: [],
+    });
   }
 });
 
@@ -1108,20 +1130,7 @@ app.get('/api/admin/users', async (_req: Request, res: Response) => {
     const pool = getDbPool();
     if (!pool) {
       return res.json({
-        users: [
-          {
-            id: 'USR-ADMIN',
-            name: 'مدير المتجر',
-            email: 'm74321176@gmail.com',
-            phone: '+963900000000',
-            balance: 100.0,
-            currency: 'USD',
-            role: 'admin',
-            createdAt: new Date().toISOString(),
-            ordersCount: 0,
-            totalSpent: 0,
-          },
-        ],
+        users: [],
       });
     }
 
@@ -1164,8 +1173,10 @@ app.get('/api/admin/users', async (_req: Request, res: Response) => {
 
     return res.json({ users });
   } catch (err: any) {
-    console.error('Error in GET /api/admin/users:', err);
-    return res.status(500).json({ error: err.message });
+    console.warn('Warning in GET /api/admin/users, serving empty users array:', err.message);
+    return res.json({
+      users: [],
+    });
   }
 });
 
@@ -1439,6 +1450,31 @@ app.get('/logos/*', async (req: Request, res: Response) => {
   }
 });
 
+// In-memory cache for manual orders fallback setting
+let manualOrdersFallbackCache: boolean | null = null;
+
+async function getAllowManualOrders(): Promise<boolean> {
+  if (manualOrdersFallbackCache !== null) {
+    return manualOrdersFallbackCache;
+  }
+  try {
+    const pool = getDbPool();
+    if (pool) {
+      const res = await pool.query('SELECT value FROM store_settings WHERE key = $1', ['allow_manual_orders']);
+      if (res.rows.length > 0 && res.rows[0].value !== undefined) {
+        let val = res.rows[0].value;
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch {}
+        }
+        manualOrdersFallbackCache = Boolean(val);
+        return manualOrdersFallbackCache;
+      }
+    }
+  } catch {}
+  manualOrdersFallbackCache = false;
+  return manualOrdersFallbackCache;
+}
+
 // 0.5. API Key Management Endpoints
 app.get('/api/sc/api-key', async (req: Request, res: Response) => {
   try {
@@ -1448,15 +1484,44 @@ app.get('/api/sc/api-key', async (req: Request, res: Response) => {
       ? `${activeKey.substring(0, 6)}••••••••••••${activeKey.substring(activeKey.length - 4)}`
       : 'غير متوفر';
 
+    const allowManual = await getAllowManualOrders();
+
     return res.json({
       hasCustomKey: !isDefault && !!activeKey,
       isDefault,
       maskedKey: masked,
       keyLength: activeKey ? activeKey.length : 0,
       prefix: activeKey ? activeKey.substring(0, 7) : '',
+      allowManualOrders: allowManual,
     });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
+  }
+});
+
+// Toggle Manual Order Queue Mode (قبول الطلبات كمعالجة يدوية عند تعطل المزود)
+app.post('/api/sc/settings/manual-orders', async (req: Request, res: Response) => {
+  try {
+    const { enabled } = req.body || {};
+    manualOrdersFallbackCache = Boolean(enabled);
+    const pool = getDbPool();
+    if (pool) {
+      await pool.query(
+        `INSERT INTO store_settings (key, value, updated_at)
+         VALUES ('allow_manual_orders', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [JSON.stringify(manualOrdersFallbackCache)]
+      );
+    }
+    return res.json({
+      success: true,
+      allowManualOrders: manualOrdersFallbackCache,
+      message: manualOrdersFallbackCache
+        ? 'تم تفعيل وضع المعالجة اليدوية البديلة عند تعطل المزود بنجاح'
+        : 'تم تعطيل وضع المعالجة اليدوية البديلة',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1546,33 +1611,34 @@ app.get('/api/sc/me', async (req: Request, res: Response) => {
 
     const data = await response.json().catch(() => null);
     if (!response.ok || !data || data.error) {
-      // Graceful fallback conforming to the user schema
       return res.json({
-        error: false,
+        error: true,
+        message: data?.message || 'تعذر جلب بيانات الحساب من SC Store أو المفتاح غير صالح',
         user: {
-          name: data?.user?.name || data?.name || 'حساب التاجر التجريبي',
-          email: data?.user?.email || data?.email || 'user@example.com',
-          balance: data?.user?.balance ?? 50000,
-          emailVerified: data?.user?.emailVerified ?? true,
-          identityVerified: data?.user?.identityVerified ?? true,
+          name: data?.user?.name || data?.name || '',
+          email: data?.user?.email || data?.email || '',
+          balance: parseFloat(data?.user?.balance ?? '0') || 0,
+          emailVerified: !!data?.user?.emailVerified,
+          identityVerified: !!data?.user?.identityVerified,
         },
         apiStatus: response.status,
-        isFallback: true,
+        isFallback: false,
       });
     }
     return res.json(data);
   } catch (error: any) {
     console.error('Error in /api/sc/me:', error);
     return res.json({
-      error: false,
+      error: true,
+      message: error.message || 'فشل الاتصال بـ SC Store',
       user: {
-        name: 'حساب التاجر التجريبي',
-        email: 'user@example.com',
-        balance: 50000,
-        emailVerified: true,
-        identityVerified: true,
+        name: '',
+        email: '',
+        balance: 0,
+        emailVerified: false,
+        identityVerified: false,
       },
-      isFallback: true,
+      isFallback: false,
     });
   }
 });
@@ -2091,228 +2157,686 @@ app.get('/api/sc/products', async (req: Request, res: Response) => {
   }
 });
 
+// Helper: get USD to SYP exchange rate
+async function getUsdToSypRate(): Promise<number> {
+  try {
+    const pool = getDbPool();
+    if (pool) {
+      const res = await pool.query("SELECT value FROM store_settings WHERE key = 'exchange_rate'");
+      if (res.rows.length > 0 && res.rows[0].value) {
+        let val = res.rows[0].value;
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch {}
+        }
+        if (val && typeof val === 'object' && val.usd_to_syp) {
+          const rate = Number(val.usd_to_syp);
+          if (rate > 0) return rate;
+        } else if (typeof val === 'number' && val > 0) {
+          return val;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Error reading usd_to_syp exchange rate:', err);
+  }
+  return 15000;
+}
+
+// Helper: find product info in cached/default products
+function findProductInfo(productId: string | number) {
+  const pId = String(productId);
+  const productsObj = cachedLiveProducts?.products || SC_STORE_DEFAULT_PRODUCTS_PAYLOAD.products;
+  if (!productsObj) return null;
+
+  for (const catKey of Object.keys(productsObj)) {
+    const list = productsObj[catKey];
+    if (Array.isArray(list)) {
+      const found = list.find((p: any) => String(p.productId || p.id) === pId);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// Anti-duplicate protection: 60-second window
+// "عند تكرار ارسال طلب لنفس المنتج و نفس عنوان الحساب المراد شحنه في غضون ٦٠ ثانية عالج طلب واحد و الغي الباقي"
+const recentOrderAttempts = new Map<string, number>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamp] of recentOrderAttempts.entries()) {
+    if (now - timestamp > 65000) {
+      recentOrderAttempts.delete(key);
+    }
+  }
+}, 120000);
+
+// Central order sync & refund logic for processing/pending orders
+export async function syncAndRefundProcessingOrders(orderIds?: string[], userId?: string) {
+  const pool = getDbPool();
+  if (!pool) {
+    return {
+      success: true,
+      totalChecked: 0,
+      updatedCount: 0,
+      completedCount: 0,
+      stillProcessingCount: 0,
+      rejectedCount: 0,
+      orders: [],
+      message: 'قاعدة البيانات غير متصلة',
+    };
+  }
+
+  let querySql = `
+    SELECT id, order_id, sc_order_id, user_id, total, currency, status, notes
+    FROM orders 
+    WHERE status IN ('processing', 'pending')
+  `;
+  const queryParams: any[] = [];
+
+  if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
+    querySql += ` AND (order_id = ANY($1) OR sc_order_id = ANY($1))`;
+    queryParams.push(orderIds);
+  } else if (userId) {
+    querySql += ` AND user_id = $1`;
+    queryParams.push(userId);
+  }
+
+  querySql += ` ORDER BY created_at DESC LIMIT 50;`;
+
+  const dbRes = await pool.query(querySql, queryParams);
+  const dbOrders = dbRes.rows;
+
+  if (dbOrders.length === 0) {
+    return {
+      success: true,
+      message: 'لا توجد أي طلبات قيد المعالجة حالياً للتحقق منها.',
+      totalChecked: 0,
+      updatedCount: 0,
+      completedCount: 0,
+      stillProcessingCount: 0,
+      rejectedCount: 0,
+      orders: [],
+    };
+  }
+
+  const uniqueIds = Array.from(
+    new Set(dbOrders.map((r: any) => String(r.sc_order_id || r.order_id || '').trim()))
+  ).filter(Boolean);
+
+  if (uniqueIds.length === 0) {
+    return {
+      success: true,
+      message: 'لا توجد معرفات صالحة للطلبات قيد المعالجة.',
+      totalChecked: 0,
+      updatedCount: 0,
+      orders: [],
+    };
+  }
+
+  const scQueryPath = uniqueIds.length === 1
+    ? `${SC_STORE_BASE_URL}/orders/${encodeURIComponent(uniqueIds[0])}`
+    : `${SC_STORE_BASE_URL}/orders/${encodeURIComponent(uniqueIds.join(':'))}`;
+
+  const authHeaders = await getAuthHeaders();
+  const scResponse = await fetch(scQueryPath, {
+    method: 'GET',
+    headers: authHeaders,
+  });
+
+  const scData = await scResponse.json().catch(() => null);
+  if (!scResponse.ok || !scData) {
+    return {
+      success: false,
+      error: scData?.message || scData?.error || 'تعذر الاتصال بـ SC Store API للتحقق من الطلبات',
+      totalChecked: uniqueIds.length,
+      updatedCount: 0,
+    };
+  }
+
+  let returnedOrdersList: any[] = [];
+  if (Array.isArray(scData.orders)) {
+    returnedOrdersList = scData.orders;
+  } else if (scData.order && typeof scData.order === 'object') {
+    returnedOrdersList = [scData.order];
+  } else if (Array.isArray(scData)) {
+    returnedOrdersList = scData;
+  } else if (scData.data && Array.isArray(scData.data)) {
+    returnedOrdersList = scData.data;
+  }
+
+  let updatedCount = 0;
+  let completedCount = 0;
+  let stillProcessingCount = 0;
+  let rejectedCount = 0;
+
+  for (const item of returnedOrdersList) {
+    const itemOrderId = String(item.orderId || item.id || '').trim();
+    const itemStatus = String(item.status || '').toLowerCase();
+    if (!itemOrderId || !itemStatus) continue;
+
+    const matchingDbOrder = dbOrders.find(
+      (r: any) => r.order_id === itemOrderId || r.sc_order_id === itemOrderId
+    );
+    if (!matchingDbOrder) continue;
+
+    if (itemStatus.includes('complete') || itemStatus.includes('success')) {
+      completedCount++;
+      try {
+        const updateRes = await pool.query(
+          `UPDATE orders 
+           SET status = 'completed', raw_response = $1, updated_at = NOW() 
+           WHERE id = $2 AND status != 'completed'
+           RETURNING id;`,
+          [JSON.stringify(item), matchingDbOrder.id]
+        );
+        if (updateRes.rowCount && updateRes.rowCount > 0) {
+          updatedCount++;
+        }
+      } catch (e) {
+        console.warn(`Failed to update completed order ${itemOrderId}:`, e);
+      }
+    } else if (
+      itemStatus.includes('fail') ||
+      itemStatus.includes('reject') ||
+      itemStatus.includes('cancel') ||
+      itemStatus.includes('refund') ||
+      itemStatus.includes('error')
+    ) {
+      rejectedCount++;
+      try {
+        // Only refund if order is currently processing/pending (prevent double refund)
+        const currentCheck = await pool.query(
+          `SELECT id, user_id, total, currency, status FROM orders WHERE id = $1 AND status IN ('processing', 'pending')`,
+          [matchingDbOrder.id]
+        );
+
+        if (currentCheck.rows.length > 0) {
+          const orderToRefund = currentCheck.rows[0];
+          const refundAmount = parseFloat(orderToRefund.total) || 0;
+          const targetUserId = orderToRefund.user_id;
+
+          if (targetUserId && refundAmount > 0) {
+            // Restore user balance
+            await pool.query(
+              `UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE id = $2`,
+              [refundAmount, targetUserId]
+            );
+
+            // Record refund in wallet_transactions
+            const txId = `TX-REFUND-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            await pool.query(
+              `INSERT INTO wallet_transactions (
+                id, user_id, type, amount, currency, status, payment_method, reference_id, notes, created_at
+              ) VALUES ($1, $2, 'refund', $3, $4, 'completed', 'system', $5, 'استرجاع تلقائي: الطلب غير مكتمل أو مرفوض من المزود', NOW())`,
+              [txId, targetUserId, refundAmount, orderToRefund.currency || 'USD', itemOrderId]
+            );
+          }
+
+          // Mark status as 'failed' ("غير مكتمل") as requested
+          await pool.query(
+            `UPDATE orders 
+             SET status = 'failed', 
+                 notes = COALESCE(notes, '') || ' [غير مكتمل - تم استرجاع الرصيد للمستخدم]', 
+                 raw_response = $1, 
+                 updated_at = NOW() 
+             WHERE id = $2`,
+            [JSON.stringify(item), matchingDbOrder.id]
+          );
+          updatedCount++;
+        }
+      } catch (e) {
+        console.warn(`Failed to process failed/refunded order ${itemOrderId}:`, e);
+      }
+    } else {
+      stillProcessingCount++;
+      await pool.query(
+        `UPDATE orders SET raw_response = $1, updated_at = NOW() WHERE id = $2`,
+        [JSON.stringify(item), matchingDbOrder.id]
+      ).catch(() => {});
+    }
+  }
+
+  return {
+    success: true,
+    message: `تم التحقق من ${uniqueIds.length} طلب قيد المعالجة بنجاح.`,
+    totalChecked: uniqueIds.length,
+    updatedCount,
+    completedCount,
+    stillProcessingCount,
+    rejectedCount,
+    orders: returnedOrdersList,
+    raw: scData,
+  };
+}
+
+// Background Worker: periodically checks processing orders every 25 seconds and auto-refunds if failed
+setInterval(async () => {
+  try {
+    const pool = getDbPool();
+    if (!pool) return;
+    const res = await pool.query(
+      `SELECT id, order_id, sc_order_id FROM orders 
+       WHERE status IN ('processing', 'pending') 
+         AND created_at >= NOW() - INTERVAL '1 day'
+       ORDER BY created_at DESC LIMIT 20;`
+    );
+    if (res.rows.length > 0) {
+      const ids = res.rows.map((r: any) => r.sc_order_id || r.order_id).filter(Boolean);
+      if (ids.length > 0) {
+        await syncAndRefundProcessingOrders(ids);
+      }
+    }
+  } catch (err) {
+    // silently catch background polling errors
+  }
+}, 25000);
+
 // 3. Create New Order / Top-up
 // Supports both game/app products & cash transfer
 app.post('/api/sc/orders', async (req: Request, res: Response) => {
-  const { productId, qty, dynamicFields, cashType, amount, wallet } = req.body;
+  const {
+    productId,
+    qty,
+    dynamicFields,
+    cashType,
+    amount,
+    wallet,
+    userId,
+    userEmail,
+    customerName,
+    price,
+    currency,
+    productName,
+    category,
+  } = req.body;
 
   try {
-    let scRequestBody: any;
+    const pool = getDbPool();
 
+    // 1. Determine target account and product identifier for 60s duplicate check
+    let rawTarget = String(
+      wallet ||
+      dynamicFields?.wallet ||
+      dynamicFields?.phone_number ||
+      dynamicFields?.phone ||
+      dynamicFields?.mobile ||
+      dynamicFields?.Player_ID ||
+      dynamicFields?.player_id ||
+      ''
+    ).trim();
+
+    // Normalize Syrian mobile phone format if it looks like a phone number
+    let cleanWallet = rawTarget;
+    const digitsOnly = rawTarget.replace(/[^\d+]/g, '');
+    if (digitsOnly.startsWith('+963') && digitsOnly.length >= 12) {
+      cleanWallet = '0' + digitsOnly.slice(4);
+    } else if (digitsOnly.startsWith('00963') && digitsOnly.length >= 13) {
+      cleanWallet = '0' + digitsOnly.slice(5);
+    } else if (digitsOnly.length === 9 && digitsOnly.startsWith('9')) {
+      cleanWallet = '0' + digitsOnly;
+    }
+
+    if (dynamicFields && typeof dynamicFields === 'object') {
+      if (dynamicFields.phone_number) dynamicFields.phone_number = cleanWallet;
+      if (dynamicFields.wallet) dynamicFields.wallet = cleanWallet;
+      if (dynamicFields.mobile) dynamicFields.mobile = cleanWallet;
+    }
+
+    const targetAccount = cleanWallet.toLowerCase();
+    const productIdentifier = String(productId || cashType || '').trim();
+
+    // 2. Anti-duplicate check: "عند تكرار ارسال طلب لنفس المنتج و نفس عنوان الحساب المراد شحنه في غضون ٦٠ ثانية عالج طلب واحد و الغي الباقي"
+    if (targetAccount && productIdentifier) {
+      const dupKey = `${targetAccount}_${productIdentifier}`;
+      const lastAttempt = recentOrderAttempts.get(dupKey);
+      if (lastAttempt && Date.now() - lastAttempt < 60000) {
+        const remainingSec = Math.ceil((60000 - (Date.now() - lastAttempt)) / 1000);
+        return res.status(429).json({
+          error: `تم إلغاء الطلب: تم إرسال طلب مماثل لنفس المنتج وعنوان الحساب خلال الـ 60 ثانية الماضية لمنع التكرار (يرجى الانتظار ${remainingSec} ثانية).`,
+          isDuplicate: true,
+        });
+      }
+
+      // Also check in DB orders within 60s
+      if (pool) {
+        const dbDupRes = await pool.query(
+          `SELECT id, order_id, created_at FROM orders 
+           WHERE (product_id = $1 OR (dynamic_fields->>'productId') = $1)
+             AND (
+               LOWER(COALESCE(dynamic_fields->>'Player_ID', '')) = $2
+               OR LOWER(COALESCE(dynamic_fields->>'player_id', '')) = $2
+               OR LOWER(COALESCE(dynamic_fields->>'phone_number', '')) = $2
+               OR LOWER(COALESCE(dynamic_fields->>'phone', '')) = $2
+               OR LOWER(COALESCE(dynamic_fields->>'mobile', '')) = $2
+               OR LOWER(COALESCE(dynamic_fields->>'wallet', '')) = $2
+             )
+             AND created_at >= NOW() - INTERVAL '60 seconds'
+           LIMIT 1;`,
+          [productIdentifier, targetAccount]
+        );
+        if (dbDupRes.rows.length > 0) {
+          return res.status(429).json({
+            error: 'تم إلغاء الطلب: تم إرسال طلب مماثل لنفس المنتج وعنوان الحساب خلال الـ 60 ثانية الماضية لمنع التكرار.',
+            isDuplicate: true,
+          });
+        }
+      }
+
+      // Record lock timestamp for 60s
+      recentOrderAttempts.set(dupKey, Date.now());
+    }
+
+    // 3. User verification and Balance Check
+    if (!userId && !userEmail) {
+      return res.status(401).json({
+        error: 'يرجى تسجيل الدخول أولاً بحسابك لإتمام عملية الشحن والدفع من رصيدك.',
+      });
+    }
+
+    if (!pool) {
+      return res.status(500).json({ error: 'عذراً حدث خطأ من قبلنا', details: 'Database not connected' });
+    }
+
+    const userRes = await pool.query(
+      'SELECT id, name, email, balance, currency, role FROM users WHERE id = $1 OR email = $2 LIMIT 1;',
+      [userId || '', userEmail || '']
+    );
+
+    if (userRes.rows.length === 0) {
+      return res.status(401).json({
+        error: 'حساب المستخدم غير موجود، يرجى تسجيل الدخول مجدداً.',
+      });
+    }
+
+    const dbUser = userRes.rows[0];
+    const userBalance = parseFloat(dbUser.balance || '0');
+    const userCurrency = (dbUser.currency || 'USD').toUpperCase();
+
+    // 4. Calculate actual required order cost
+    let unitPrice = Number(price || 0);
+    let itemCurrency = String(currency || 'USD').toUpperCase();
+    let prodName = String(productName || '').trim();
+    let prodCategory = String(category || '').trim();
+
+    if (productId) {
+      const catalogProd = findProductInfo(productId);
+      if (catalogProd) {
+        if (!unitPrice || unitPrice <= 0) unitPrice = Number(catalogProd.price || 0);
+        if (!itemCurrency) itemCurrency = String(catalogProd.currency || 'USD').toUpperCase();
+        if (!prodName) prodName = catalogProd.name;
+        if (!prodCategory) prodCategory = catalogProd.category;
+      }
+    }
+
+    let normalizedCashType = cashType;
     if (cashType) {
-      // Cash mode: POST https://sc-store.top/api/v1/orders
-      // Request Body: { cashType, amount, wallet }
-      const cleanWallet =
-        wallet ||
-        dynamicFields?.wallet ||
-        dynamicFields?.phone_number ||
-        dynamicFields?.phone ||
-        dynamicFields?.Player_ID ||
-        '';
-      const cleanAmount = Number(amount || dynamicFields?.amount || qty || 0);
+      normalizedCashType = String(cashType).toLowerCase().includes('mtn') ? 'mtn_cash' : 'syriatel_cash';
+      unitPrice = Number(amount || dynamicFields?.amount || 0);
+      itemCurrency = 'SYP';
+      if (!prodName) prodName = normalizedCashType === 'mtn_cash' ? 'تحويل MTN كاش' : 'تحويل سيريتل كاش';
+      if (!prodCategory) prodCategory = 'خدمات الكاش';
+    }
 
+    const orderQty = cashType ? 1 : Math.max(1, Number(qty || 1));
+    const totalRawPrice = cashType ? unitPrice : (unitPrice * orderQty);
+
+    const usdToSyp = await getUsdToSypRate();
+    let costInUserCurrency = totalRawPrice;
+
+    if (userCurrency === 'USD' && itemCurrency === 'SYP') {
+      costInUserCurrency = totalRawPrice / usdToSyp;
+      costInUserCurrency = Math.round(costInUserCurrency * 100) / 100;
+    } else if (userCurrency === 'SYP' && itemCurrency === 'USD') {
+      costInUserCurrency = Math.round(totalRawPrice * usdToSyp);
+    } else {
+      costInUserCurrency = userCurrency === 'USD' ? Math.round(totalRawPrice * 100) / 100 : Math.round(totalRawPrice);
+    }
+
+    // 5. Balance Check
+    // "تحقق من رصيد المستخدم الفعلي عند انشاء طلب شراء بعدها اما يتابع الشحن او يظهر له رصيد حسابك غير كافي ( في حال عدم توفر رصيد للمستخدم )"
+    if (userBalance < costInUserCurrency) {
+      return res.status(400).json({
+        error: 'رصيد حسابك غير كافي',
+        requiredBalance: costInUserCurrency,
+        currentBalance: userBalance,
+        currency: userCurrency,
+      });
+    }
+
+    // 6. Build SC Store API payload
+    let scRequestBody: any;
+    if (cashType) {
       if (!cleanWallet) {
         return res.status(400).json({ error: 'رقم المحفظة (wallet) مطلوب لطلب تحويل الكاش' });
       }
-      if (!cleanAmount || cleanAmount <= 0) {
+      if (!unitPrice || unitPrice <= 0) {
         return res.status(400).json({ error: 'المبلغ (amount) مطلوب لطلب تحويل الكاش' });
       }
-
       scRequestBody = {
-        cashType,
-        amount: cleanAmount,
+        cashType: normalizedCashType,
+        amount: unitPrice,
         wallet: cleanWallet,
       };
     } else {
-      // Product charge mode: POST https://sc-store.top/api/v1/orders
-      // Request Body: { productId, qty, dynamicFields }
       if (!productId) {
         return res.status(400).json({ error: 'productId is required' });
       }
-
       scRequestBody = {
         productId: Number(productId) || productId,
-        qty: Number(qty) || 1,
+        qty: orderQty,
         dynamicFields: dynamicFields || {},
       };
     }
 
-    const authHeaders = await getAuthHeaders(req, { 'Content-Type': 'application/json' });
-    const response = await fetch(`${SC_STORE_BASE_URL}/orders`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify(scRequestBody),
-    });
+    // 7. Atomically deduct balance from user
+    const deductRes = await pool.query(
+      `UPDATE users 
+       SET balance = balance - $1, updated_at = NOW() 
+       WHERE id = $2 AND balance >= $1 
+       RETURNING balance;`,
+      [costInUserCurrency, dbUser.id]
+    );
 
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-      return res.status(response.status).json(data || { error: 'Failed to create order', status: response.status });
+    if (deductRes.rows.length === 0) {
+      return res.status(400).json({
+        error: 'رصيد حسابك غير كافي',
+      });
     }
-    return res.json(data);
+
+    const newBalanceAfterDeduct = parseFloat(deductRes.rows[0].balance);
+
+    // Record purchase transaction in DB
+    const txId = `TX-PURCHASE-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    await pool.query(
+      `INSERT INTO wallet_transactions (
+        id, user_id, type, amount, currency, status, payment_method, reference_id, notes, created_at
+      ) VALUES ($1, $2, 'purchase', $3, $4, 'completed', 'wallet_balance', $5, $6, NOW())`,
+      [txId, dbUser.id, costInUserCurrency, userCurrency, String(productId || cashType), `طلب شحن ${prodName || 'منتج'}`]
+    );
+
+    // 8. Send order to SC Store API
+    const authHeaders = await getAuthHeaders(req, { 'Content-Type': 'application/json' });
+    let scResponse: any = null;
+    let scData: any = null;
+    let scFetchError: any = null;
+
+    try {
+      scResponse = await fetch(`${SC_STORE_BASE_URL}/orders`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(scRequestBody),
+      });
+      scData = await scResponse.json().catch(() => null);
+    } catch (fetchErr: any) {
+      scFetchError = fetchErr;
+    }
+
+    // 9. Handle supplier/network failure with immediate refund rollback or manual queue fallback
+    // "عذراً حدث خطأ من قبلنا ( للأخطاء الاخرى من الموقع او المورد )"
+    if (scFetchError || !scResponse || !scResponse.ok || !scData || scData.error) {
+      const supplierErrMsg = scData?.message || scData?.error || scFetchError?.message || 'تعذر الاتصال بالمزود الخارجي';
+      const isApiKeyErr =
+        scResponse?.status === 401 ||
+        scResponse?.status === 403 ||
+        String(supplierErrMsg).includes('مفتاح API') ||
+        String(supplierErrMsg).toLowerCase().includes('api key') ||
+        String(supplierErrMsg).toLowerCase().includes('unauthorized') ||
+        String(supplierErrMsg).toLowerCase().includes('forbidden');
+
+      const allowManual = await getAllowManualOrders();
+
+      // If Manual Queue Fallback is enabled: accept order in DB for manual fulfillment instead of failing the customer!
+      if (allowManual) {
+        const localOrderId = `ORD-M-${Date.now()}`;
+        try {
+          await pool.query(
+            `INSERT INTO orders (
+              id, order_id, sc_order_id, user_id, product_id, product_name, category, 
+              qty, price, total, currency, dynamic_fields, status, raw_response, 
+              notes, customer_name, customer_email, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              status = EXCLUDED.status,
+              raw_response = EXCLUDED.raw_response,
+              updated_at = NOW();`,
+            [
+              localOrderId,
+              localOrderId,
+              localOrderId,
+              dbUser.id,
+              String(productId || cashType || ''),
+              prodName || 'منتج رقمي',
+              prodCategory || 'شحن',
+              orderQty,
+              unitPrice,
+              costInUserCurrency,
+              userCurrency,
+              JSON.stringify(dynamicFields || {}),
+              'processing',
+              JSON.stringify({ manualQueue: true, supplierError: supplierErrMsg, status: scResponse?.status || 500 }),
+              `طلب قيد المعالجة اليدوية - تعذر الربط التلقائي بالمزود (${supplierErrMsg})`,
+              dbUser.name || customerName || '',
+              dbUser.email || userEmail || '',
+            ]
+          );
+
+          return res.json({
+            success: true,
+            orderId: localOrderId,
+            order: {
+              orderId: localOrderId,
+              status: 'processing',
+              message: 'تم استلام طلبك وتثبيته بنجاح وهو الآن قيد المعالجة والمراجعة.',
+            },
+            user: {
+              id: dbUser.id,
+              balance: newBalanceAfterDeduct,
+              currency: userCurrency,
+            },
+            isManualQueue: true,
+          });
+        } catch (queueErr) {
+          console.error('Failed to save manual queue order:', queueErr);
+        }
+      }
+
+      // Rollback deducted user balance if manual queue is disabled or failed
+      try {
+        await pool.query(
+          `UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE id = $2`,
+          [costInUserCurrency, dbUser.id]
+        );
+
+        const rollbackTxId = `TX-REFUND-FAIL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        await pool.query(
+          `INSERT INTO wallet_transactions (
+            id, user_id, type, amount, currency, status, payment_method, reference_id, notes, created_at
+          ) VALUES ($1, $2, 'refund', $3, $4, 'completed', 'system', $5, 'استرجاع فوري لتعذر إنشاء الطلب لدى المورد', NOW())`,
+          [rollbackTxId, dbUser.id, costInUserCurrency, userCurrency, String(productId || cashType)]
+        );
+      } catch (refundErr) {
+        console.error('Critical rollback error:', refundErr);
+      }
+
+      const formattedError = isApiKeyErr
+        ? 'عذراً حدث خطأ من قبلنا: مفتاح الربط مع مزود الخدمة (SC Store) غير صالح أو معطّل حالياً في إعدادات المتجر. تم استرجاع رصيدك بالكامل.'
+        : `عذراً حدث خطأ من قبلنا: ${supplierErrMsg} (تم استرجاع رصيدك بالكامل).`;
+
+      return res.status(500).json({
+        error: formattedError,
+        supplierError: supplierErrMsg,
+        isApiKeyError: isApiKeyErr,
+        status: scResponse?.status || 500,
+        suggestedAction: isApiKeyErr ? 'update_sc_api_key' : undefined,
+      });
+    }
+
+    // 10. SC Store succeeded -> persist order in DB with initial status
+    const scOrderId = String(scData.order?.orderId || scData.orderId || scData.id || `SC-${Date.now()}`).trim();
+    const scStatus = String(scData.order?.status || scData.status || 'processing').toLowerCase();
+
+    await pool.query(
+      `INSERT INTO orders (
+        id, order_id, sc_order_id, user_id, product_id, product_name, category, 
+        qty, price, total, currency, dynamic_fields, status, raw_response, 
+        customer_name, customer_email, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        raw_response = EXCLUDED.raw_response,
+        updated_at = NOW();`,
+      [
+        scOrderId,
+        scOrderId,
+        scOrderId,
+        dbUser.id,
+        String(productId || cashType || ''),
+        prodName || scData.order?.product || 'منتج رقمي',
+        prodCategory || scData.order?.category || '',
+        orderQty,
+        unitPrice,
+        costInUserCurrency,
+        userCurrency,
+        JSON.stringify(dynamicFields || {}),
+        scStatus,
+        JSON.stringify(scData),
+        dbUser.name || customerName,
+        dbUser.email || userEmail,
+      ]
+    );
+
+    return res.json({
+      error: false,
+      success: true,
+      orderId: scOrderId,
+      order: {
+        orderId: scOrderId,
+        status: scStatus,
+        product: prodName || scData.order?.product,
+        category: prodCategory || scData.order?.category,
+        price: costInUserCurrency,
+        newBalance: newBalanceAfterDeduct,
+      },
+      user: {
+        id: dbUser.id,
+        balance: newBalanceAfterDeduct,
+        currency: userCurrency,
+      },
+      raw: scData,
+    });
   } catch (error: any) {
     console.error('Error in /api/sc/orders:', error);
-    return res.status(500).json({ error: error.message || 'Internal Server Error' });
+    return res.status(500).json({ error: 'عذراً حدث خطأ من قبلنا', details: error.message });
   }
 });
 
 // 4. Check Processing Orders Only (تحقق من الطلبات التي قيد المعالجة فقط)
-// Checks only orders with status = 'processing' or 'pending', queries SC Store API, and updates DB
 app.post('/api/sc/orders/check-processing', async (req: Request, res: Response) => {
   const { orderIds, userId } = req.body || {};
-
   try {
-    const pool = getDbPool();
-    let processingOrdersToQuery: Array<{ orderId: string; currentStatus: string; dbId?: string }> = [];
-
-    if (pool) {
-      let querySql = `
-        SELECT id, order_id, sc_order_id, status 
-        FROM orders 
-        WHERE status IN ('processing', 'pending')
-      `;
-      const queryParams: any[] = [];
-
-      if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
-        querySql += ` AND (order_id = ANY($1) OR sc_order_id = ANY($1))`;
-        queryParams.push(orderIds);
-      } else if (userId) {
-        querySql += ` AND user_id = $1`;
-        queryParams.push(userId);
-      }
-
-      querySql += ` ORDER BY created_at DESC LIMIT 50;`;
-
-      const dbRes = await pool.query(querySql, queryParams);
-      processingOrdersToQuery = dbRes.rows.map((r: any) => ({
-        orderId: r.sc_order_id || r.order_id,
-        currentStatus: r.status,
-        dbId: r.id,
-      }));
-    } else if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
-      // In-memory or client-provided list of processing orders
-      processingOrdersToQuery = orderIds.map((id: string) => ({
-        orderId: id,
-        currentStatus: 'processing',
-      }));
-    }
-
-    // If no processing orders found, return immediately without calling SC Store API
-    if (processingOrdersToQuery.length === 0) {
-      return res.json({
-        success: true,
-        message: 'لا توجد أي طلبات قيد المعالجة حالياً للتحقق منها.',
-        totalChecked: 0,
-        updatedCount: 0,
-        completedCount: 0,
-        stillProcessingCount: 0,
-        rejectedCount: 0,
-        orders: [],
-      });
-    }
-
-    // Extract unique clean SC order IDs
-    const uniqueIds = Array.from(new Set(processingOrdersToQuery.map((p) => p.orderId.trim()))).filter(Boolean);
-
-    if (uniqueIds.length === 0) {
-      return res.json({
-        success: true,
-        message: 'لا توجد معرفات صالحة للطلبات قيد المعالجة.',
-        totalChecked: 0,
-        updatedCount: 0,
-        orders: [],
-      });
-    }
-
-    // SC Store API supports checking multiple orders with colon separator: /orders/:id1:id2:id3
-    // Or single order: /orders/:orderId
-    const scQueryPath = uniqueIds.length === 1
-      ? `${SC_STORE_BASE_URL}/orders/${encodeURIComponent(uniqueIds[0])}`
-      : `${SC_STORE_BASE_URL}/orders/${encodeURIComponent(uniqueIds.join(':'))}`;
-
-    const authHeaders = await getAuthHeaders(req);
-    const scResponse = await fetch(scQueryPath, {
-      method: 'GET',
-      headers: authHeaders,
-    });
-
-    const scData = await scResponse.json().catch(() => null);
-
-    if (!scResponse.ok || !scData) {
-      return res.status(scResponse.status || 500).json({
-        success: false,
-        error: scData?.message || scData?.error || 'تعذر الاتصال بـ SC Store API للتحقق من الطلبات',
-        totalChecked: uniqueIds.length,
-      });
-    }
-
-    // Normalize returned orders list
-    let returnedOrdersList: any[] = [];
-    if (Array.isArray(scData.orders)) {
-      returnedOrdersList = scData.orders;
-    } else if (scData.order && typeof scData.order === 'object') {
-      returnedOrdersList = [scData.order];
-    } else if (Array.isArray(scData)) {
-      returnedOrdersList = scData;
-    } else if (scData.data && Array.isArray(scData.data)) {
-      returnedOrdersList = scData.data;
-    }
-
-    let updatedCount = 0;
-    let completedCount = 0;
-    let stillProcessingCount = 0;
-    let rejectedCount = 0;
-
-    // Update orders in DB
-    if (pool && returnedOrdersList.length > 0) {
-      for (const item of returnedOrdersList) {
-        const itemOrderId = item.orderId || item.id;
-        const itemStatus = (item.status || '').toLowerCase();
-
-        if (itemOrderId && itemStatus) {
-          if (itemStatus.includes('complete') || itemStatus.includes('success')) {
-            completedCount++;
-          } else if (itemStatus.includes('fail') || itemStatus.includes('reject') || itemStatus.includes('refund')) {
-            rejectedCount++;
-          } else {
-            stillProcessingCount++;
-          }
-
-          try {
-            const updateResult = await pool.query(
-              `UPDATE orders 
-               SET status = $1, raw_response = $2, updated_at = NOW() 
-               WHERE (order_id = $3 OR sc_order_id = $3) AND status != $1
-               RETURNING id;`,
-              [itemStatus, JSON.stringify(item), itemOrderId]
-            );
-            if (updateResult.rowCount && updateResult.rowCount > 0) {
-              updatedCount++;
-            }
-          } catch (e) {
-            console.warn(`Failed to update DB for order ${itemOrderId}:`, e);
-          }
-        }
-      }
-    } else {
-      for (const item of returnedOrdersList) {
-        const s = (item.status || '').toLowerCase();
-        if (s.includes('complete') || s.includes('success')) completedCount++;
-        else if (s.includes('fail') || s.includes('reject') || s.includes('refund')) rejectedCount++;
-        else stillProcessingCount++;
-      }
-    }
-
-    return res.json({
-      success: true,
-      message: `تم التحقق من ${uniqueIds.length} طلب قيد المعالجة بنجاح.`,
-      totalChecked: uniqueIds.length,
-      updatedCount,
-      completedCount,
-      stillProcessingCount,
-      rejectedCount,
-      orders: returnedOrdersList,
-      raw: scData,
-    });
+    const result = await syncAndRefundProcessingOrders(orderIds, userId);
+    return res.json(result);
   } catch (error: any) {
     console.error('Error in /api/sc/orders/check-processing:', error);
     return res.status(500).json({ error: error.message || 'Internal Server Error' });
@@ -2328,6 +2852,12 @@ app.get('/api/sc/orders/:orderId', async (req: Request, res: Response) => {
   }
 
   try {
+    // If orderId is in database, run syncAndRefundProcessingOrders for it
+    const pool = getDbPool();
+    if (pool) {
+      await syncAndRefundProcessingOrders([orderId]);
+    }
+
     const authHeaders = await getAuthHeaders(req);
     const response = await fetch(`${SC_STORE_BASE_URL}/orders/${encodeURIComponent(orderId)}`, {
       method: 'GET',
@@ -2337,19 +2867,6 @@ app.get('/api/sc/orders/:orderId', async (req: Request, res: Response) => {
     const data = await response.json().catch(() => null);
     if (!response.ok) {
       return res.status(response.status).json(data || { error: 'Failed to fetch order status', status: response.status });
-    }
-
-    // Auto-update order status in database if present
-    const pool = getDbPool();
-    if (pool && data) {
-      const orderObj = data.order || (Array.isArray(data.orders) ? data.orders[0] : null) || data;
-      if (orderObj && orderObj.status) {
-        const targetId = orderObj.orderId || orderId;
-        pool.query(
-          'UPDATE orders SET status = $1, raw_response = $2, updated_at = NOW() WHERE order_id = $3 OR sc_order_id = $3',
-          [orderObj.status, JSON.stringify(orderObj), targetId]
-        ).catch(() => {});
-      }
     }
 
     return res.json(data);

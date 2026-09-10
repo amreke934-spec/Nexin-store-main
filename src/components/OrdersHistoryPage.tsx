@@ -293,9 +293,6 @@ export const OrdersHistoryPage: React.FC<OrdersHistoryPageProps> = React.memo(({
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
               سجل طلباتي
             </h1>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-relaxed max-w-xl">
-              تصفح ومتابعة كافة طلبات الشحن والبطاقات الرقمية السابقة، مع إمكانية التحقق المباشر من حالة التسليم فورياً عبر SC Store API.
-            </p>
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-center flex-wrap">

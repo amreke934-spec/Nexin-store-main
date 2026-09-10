@@ -72,9 +72,19 @@ export interface OrderOptions {
 }
 
 export interface CreateOrderPayload {
-  productId: string | number;
-  qty: number;
-  dynamicFields: Record<string, any>;
+  productId?: string | number;
+  qty?: number;
+  dynamicFields?: Record<string, any>;
+  userId?: string;
+  userEmail?: string;
+  customerName?: string;
+  productName?: string;
+  category?: string;
+  price?: number;
+  currency?: string;
+  cashType?: string;
+  amount?: number;
+  wallet?: string;
 }
 
 export interface OrderItem {
@@ -155,5 +165,17 @@ export interface DepositRequest {
   updatedAt?: string;
   approvedAt?: string;
   approvedBy?: string;
+}
+
+export interface MaintenanceSettings {
+  isEnabled: boolean;
+  title: string;
+  message: string;
+  endTime?: string; // ISO string e.g. "2026-09-10T18:00:00"
+  allowLogin?: boolean;
+  contactWhatsapp?: string;
+  contactTelegram?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 

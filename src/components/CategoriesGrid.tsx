@@ -60,11 +60,13 @@ const CATEGORY_VISUALS: Record<string, { description: string; icon: LucideIcon; 
     description: 'تعبئة وتحويل رصيد وحدات سيريتل (Syriatel) الفورية',
     icon: Smartphone,
     image: 'https://sc-store.top/logos/syriatel.png',
+    badge: 'تحويل رصيد',
   },
   'وحدات MTN': {
     description: 'تعبئة وتحويل رصيد وحدات MTN الفورية',
     icon: Radio,
     image: 'https://sc-store.top/logos/mtn.png',
+    badge: 'تحويل رصيد',
   },
 };
 

@@ -21,6 +21,7 @@ import { createNewOrder } from '../services/scStoreApi';
 import { saveOrderToDb } from '../services/dbApi';
 import { getProductFieldMetadata, getProductServiceType } from '../utils/productUtils';
 import { convertToSyp, formatSypNumber, formatPriceSyp } from '../utils/currencyUtils';
+import { normalizeSyrianPhoneNumber, detectSyrianNetwork } from '../utils/searchUtils';
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -116,29 +117,53 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     try {
       // Ensure the primary field is populated in dynamicFields
       const cleanedFields = { ...dynamicFields };
-      const mainVal = dynamicFields[fieldMeta.primaryFieldName] || dynamicFields['Player_ID'] || Object.values(dynamicFields)[0] || '';
+      const mainVal = dynamicFields[fieldMeta.primaryFieldName] || dynamicFields['phone_number'] || dynamicFields['wallet'] || dynamicFields['Player_ID'] || Object.values(dynamicFields)[0] || '';
       
       if (serviceType === 'cash' || serviceType === 'telecom') {
-        cleanedFields['phone_number'] = mainVal;
-        cleanedFields['mobile'] = mainVal;
-        cleanedFields['Player_ID'] = mainVal; // Provide compatibility with SC Store underlying parameter
+        const normPhone = normalizeSyrianPhoneNumber(mainVal);
+        cleanedFields['phone_number'] = normPhone;
+        cleanedFields['mobile'] = normPhone;
+        cleanedFields['wallet'] = normPhone;
+        cleanedFields['Player_ID'] = normPhone;
       } else {
         cleanedFields['Player_ID'] = mainVal;
       }
 
       let payload: any;
       if (product.isCash || product.sectionKey === 'cashbalances' || (product as any).cashType) {
+        const resolvedType = String((product as any).cashType || '').toLowerCase();
+        const normalizedCashType = (resolvedType.includes('mtn') || product.name?.toLowerCase().includes('mtn'))
+          ? 'mtn_cash'
+          : 'syriatel_cash';
+
+        const cashAmount = Number(cleanedFields['amount'] || qty || product.price);
+        const cashWallet = cleanedFields['wallet'] || cleanedFields['phone_number'] || cleanedFields['Player_ID'] || '';
+
         payload = {
-          cashType: (product as any).cashType || 'syriatel-cash',
-          amount: Number(cleanedFields['amount'] || qty || product.price),
-          wallet: cleanedFields['wallet'] || cleanedFields['phone_number'] || cleanedFields['Player_ID'] || '',
+          cashType: normalizedCashType,
+          amount: cashAmount,
+          wallet: cashWallet,
           dynamicFields: cleanedFields,
+          userId: currentUser?.id,
+          userEmail: currentUser?.email,
+          customerName: currentUser?.name,
+          productName: product.name,
+          category: product.category,
+          price: cashAmount,
+          currency: product.currency || 'SYP',
         };
       } else {
         payload = {
           productId: product.productId,
           qty: qty,
           dynamicFields: cleanedFields,
+          userId: currentUser?.id,
+          userEmail: currentUser?.email,
+          customerName: currentUser?.name,
+          productName: product.name,
+          category: product.category,
+          price: product.price,
+          currency: product.currency || 'USD',
         };
       }
 
@@ -186,9 +211,27 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     setTimeout(() => setCopiedId(false), 2500);
   };
 
-  const totalRawPrice = product.price * qty;
+  const isCashProduct = Boolean(product.isCash || product.sectionKey === 'cashbalances' || (product as any).cashType);
+  const enteredCashAmount = Number(dynamicFields['amount'] || qty || product.price);
+  const totalRawPrice = isCashProduct ? enteredCashAmount : product.price * qty;
   const totalSypAmount = convertToSyp(totalRawPrice, product.currency || 'USD');
   const formattedTotalPrice = `${formatSypNumber(totalSypAmount)} ل.س`;
+
+  // Network operator mismatch check
+  const enteredPhone = dynamicFields['phone_number'] || dynamicFields['wallet'] || dynamicFields[fieldMeta.primaryFieldName] || dynamicFields['Player_ID'] || '';
+  const detectedNet = detectSyrianNetwork(enteredPhone);
+  const isSyriatelService = product.sectionKey === 'syriatel' || product.category?.includes('سيريتل') || (product as any).cashType === 'syriatel_cash' || product.name?.includes('سيريتل');
+  const isMtnService = product.sectionKey === 'mtn' || product.category?.includes('MTN') || (product as any).cashType === 'mtn_cash' || product.name?.toLowerCase().includes('mtn');
+
+  const networkMismatchNotice = (() => {
+    if (detectedNet === 'mtn' && isSyriatelService) {
+      return 'تنبيه: الرقم المدخل يبدو تابعاً لشبكة MTN، بينما الخدمة المحددة هي سيريتل. يرجى التأكد لتجنب فشل الشحن.';
+    }
+    if (detectedNet === 'syriatel' && isMtnService) {
+      return 'تنبيه: الرقم المدخل يبدو تابعاً لشبكة سيريتل، بينما الخدمة المحددة هي MTN. يرجى التأكد لتجنب فشل الشحن.';
+    }
+    return null;
+  })();
 
   // Render correct icon based on domain
   const renderFieldIcon = () => {
@@ -466,31 +509,41 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 )}
               </div>
 
-              {/* Quantity / Amount Selector */}
-              <div className="flex items-center justify-between bg-gray-50 dark:bg-white/5 p-3 rounded-2xl border border-gray-200/80 dark:border-white/10">
-                <span className="text-xs font-bold text-[#1A1A1A] dark:text-white">
-                  {serviceType === 'cash' ? 'عدد مرات التحويل:' : 'عدد مرات الشحن (الكمية):'}
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setQty((q) => Math.max(1, q - 1))}
-                    className="w-7 h-7 rounded-lg bg-white dark:bg-white/10 border border-gray-300 dark:border-white/10 flex items-center justify-center font-bold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/20 active:scale-95 cursor-pointer"
-                  >
-                    -
-                  </button>
-                  <span className="w-8 text-center font-bold text-sm text-[#1A1A1A] dark:text-white font-mono">
-                    {qty}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setQty((q) => Math.min(10, q + 1))}
-                    className="w-7 h-7 rounded-lg bg-white dark:bg-white/10 border border-gray-300 dark:border-white/10 flex items-center justify-center font-bold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/20 active:scale-95 cursor-pointer"
-                  >
-                    +
-                  </button>
+              {/* Network Operator Mismatch Warning */}
+              {networkMismatchNotice && (
+                <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center gap-2 text-amber-600 dark:text-amber-400 text-xs font-bold animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{networkMismatchNotice}</span>
                 </div>
-              </div>
+              )}
+
+              {/* Quantity / Amount Selector (Only for non-cash products) */}
+              {!isCashProduct && (
+                <div className="flex items-center justify-between bg-gray-50 dark:bg-white/5 p-3 rounded-2xl border border-gray-200/80 dark:border-white/10">
+                  <span className="text-xs font-bold text-[#1A1A1A] dark:text-white">
+                    عدد مرات الشحن (الكمية):
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setQty((q) => Math.max(1, q - 1))}
+                      className="w-7 h-7 rounded-lg bg-white dark:bg-white/10 border border-gray-300 dark:border-white/10 flex items-center justify-center font-bold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/20 active:scale-95 cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <span className="w-8 text-center font-bold text-sm text-[#1A1A1A] dark:text-white font-mono">
+                      {qty}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setQty((q) => Math.min(10, q + 1))}
+                      className="w-7 h-7 rounded-lg bg-white dark:bg-white/10 border border-gray-300 dark:border-white/10 flex items-center justify-center font-bold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/20 active:scale-95 cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Customer Info Reminder */}
               {currentUser && (

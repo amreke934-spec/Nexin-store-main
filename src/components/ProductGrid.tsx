@@ -3,17 +3,16 @@ import {
   Search, 
   AlertCircle, 
   RefreshCw, 
-  ArrowRight,
-  Wallet
+  ArrowRight
 } from 'lucide-react';
-import { Product, StoreBanner, CustomerUser } from '../types';
-import { formatSypNumber } from '../utils/currencyUtils';
+import { Product, StoreBanner } from '../types';
 import { Breadcrumbs } from './store/Breadcrumbs';
 import { CategoryCard, CategorySummary } from './store/CategoryCard';
 import { GameCard, GameGroup } from './store/GameCard';
 import { PackageCard } from './store/PackageCard';
 import { GamePackagesView } from './store/GamePackagesView';
 import { BannerSlider } from './BannerSlider';
+import { isProductSearchMatch, isGameSearchMatch } from '../utils/searchUtils';
 
 interface ProductGridProps {
   products: Product[];
@@ -23,8 +22,6 @@ interface ProductGridProps {
   onSelectProduct: (product: Product, options?: { playerId?: string; qty?: number }) => void;
   banners?: StoreBanner[];
   onOpenBannerManager?: () => void;
-  currentUser?: CustomerUser | null;
-  onOpenDeposit?: () => void;
 }
 
 export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
@@ -35,8 +32,6 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
   onSelectProduct,
   banners = [],
   onOpenBannerManager,
-  currentUser,
-  onOpenDeposit,
 }) => {
   // Navigation states for the 3 Tiers
   // Tier 1: selectedCategory === null && selectedGame === null (Home Categories View)
@@ -169,17 +164,9 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
     });
 
     // Filter by search query if user types in category view
-    const q = searchQuery.trim().toLowerCase();
+    const q = searchQuery.trim();
     if (q) {
-      list = list.filter(
-        (g) =>
-          g.gameName.toLowerCase().includes(q) ||
-          g.packages.some(
-            (p) =>
-              p.name.toLowerCase().includes(q) ||
-              String(p.productId).toLowerCase().includes(q)
-          )
-      );
+      list = list.filter((g) => isGameSearchMatch(g.gameName, g.packages, q));
     }
 
     return list;
@@ -203,31 +190,18 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
     });
 
     // Filter by search query if user types in package view
-    const q = searchQuery.trim().toLowerCase();
+    const q = searchQuery.trim();
     if (!q) return list;
 
-    return list.filter((p) => {
-      return (
-        p.name.toLowerCase().includes(q) ||
-        String(p.productId).toLowerCase().includes(q) ||
-        String(p.price).includes(q)
-      );
-    });
+    return list.filter((p) => isProductSearchMatch(p, q));
   }, [products, selectedCategory, selectedGame, searchQuery]);
 
   // Global search matching for Tier 1 (if user searches from Home)
   const globalSearchResults = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = searchQuery.trim();
     if (!q || selectedCategory !== null) return [];
 
-    return products.filter((p) => {
-      return (
-        p.name.toLowerCase().includes(q) ||
-        (p.gameName && p.gameName.toLowerCase().includes(q)) ||
-        p.category.toLowerCase().includes(q) ||
-        String(p.productId).toLowerCase().includes(q)
-      );
-    });
+    return products.filter((p) => isProductSearchMatch(p, q));
   }, [products, searchQuery, selectedCategory]);
 
   return (
@@ -251,40 +225,6 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
           onOpenManageModal={onOpenBannerManager}
           onSelectCategory={handleSelectCategory}
         />
-      )}
-
-      {/* Quick Deposit Bar for Logged-In Users on the Main Screen */}
-      {currentUser && onOpenDeposit && (
-        <div className="max-w-2xl mx-auto p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-purple-50 via-white to-emerald-50 dark:from-purple-950/30 dark:via-slate-900 dark:to-emerald-950/30 border border-purple-200/80 dark:border-purple-800/40 flex items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-center gap-2.5 sm:gap-3">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shadow-sm shadow-emerald-500/20 shrink-0">
-              <Wallet className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] sm:text-xs font-bold text-slate-700 dark:text-slate-300">
-                  مرحباً بك، {currentUser.name}
-                </span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 font-bold">
-                  محفظتك
-                </span>
-              </div>
-              <p className="text-xs sm:text-sm font-black text-slate-900 dark:text-white font-mono mt-0.5">
-                رصيدك: {formatSypNumber(currentUser.balance ?? 0)} ل.س
-              </p>
-            </div>
-          </div>
-
-          <button
-            id="main-deposit-btn"
-            type="button"
-            onClick={onOpenDeposit}
-            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#7F00FF] hover:brightness-110 active:scale-95 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20 shrink-0 cursor-pointer"
-          >
-            <Wallet className="w-3.5 h-3.5" />
-            <span>إيداع رصيد</span>
-          </button>
-        </div>
       )}
 
       {/* Global & Contextual Search Bar */}

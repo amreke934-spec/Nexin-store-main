@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, startTransition } from 'react';
+import React, { useState, useEffect, useCallback, useRef, startTransition } from 'react';
 import { MerchantInfo, Product, CustomerUser, OrderItem, OrderOptions, StoreBanner } from './types';
 import { fetchMerchantInfo, fetchProducts } from './services/scStoreApi';
 import { fetchUserOrdersFromDb, fetchStoreSetting, saveStoreSetting, fetchUserProfile } from './services/dbApi';
@@ -20,6 +20,10 @@ import { AboutPage } from './components/AboutPage';
 import { BannerManagementModal } from './components/BannerManagementModal';
 import { FloatingSupportWidget } from './components/FloatingSupportWidget';
 import { DepositModal } from './components/DepositModal';
+import { PullToRefresh } from './components/PullToRefresh';
+import { MaintenanceScreen } from './components/MaintenanceScreen';
+import { MaintenanceSettings } from './types';
+import { isUserAdmin, DEFAULT_MAINTENANCE_SETTINGS } from './utils/adminUtils';
 
 export default function App() {
   // Splash Screen initial state
@@ -34,6 +38,10 @@ export default function App() {
 
   // User Deposit Modal State
   const [isDepositModalOpen, setIsDepositModalOpen] = useState<boolean>(false);
+
+  // Maintenance Mode state
+  const [maintenanceSettings, setMaintenanceSettings] = useState<MaintenanceSettings>(DEFAULT_MAINTENANCE_SETTINGS);
+  const [adminInitialTab, setAdminInitialTab] = useState<'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance'>('stats');
 
   // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track' | 'about' | 'checkout'
   const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track' | 'about' | 'checkout'>('products');
@@ -76,6 +84,15 @@ export default function App() {
       return null;
     }
   });
+
+  const currentUserRef = useRef<CustomerUser | null>(currentUser);
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  // Track single sync on entry
+  const hasSyncedUserOnEntryRef = useRef(false);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
 
   // Orders list (persisted locally + in Neon DB)
   const [orders, setOrders] = useState<OrderItem[]>(() => {
@@ -121,11 +138,12 @@ export default function App() {
     localStorage.setItem('nexen_orders_history', JSON.stringify(orders));
   }, [orders]);
 
-  // Function to refresh orders from Neon DB
-  const refreshUserOrders = useCallback(async () => {
-    if (!currentUser || !currentUser.id) return;
+  // Function to refresh orders from Neon DB without infinite loops
+  const refreshUserOrders = useCallback(async (targetUserId?: string) => {
+    const uid = targetUserId || currentUserRef.current?.id;
+    if (!uid) return;
     try {
-      const dbOrders = await fetchUserOrdersFromDb(currentUser.id);
+      const dbOrders = await fetchUserOrdersFromDb(uid);
       if (dbOrders && dbOrders.length > 0) {
         setOrders((prev) => {
           const map = new Map<string, OrderItem>();
@@ -141,34 +159,7 @@ export default function App() {
     } catch (e) {
       console.warn('Error refreshing user orders from DB:', e);
     }
-  }, [currentUser]);
-
-  // Sync saved exchange rate and user orders from Neon DB on mount / user change
-  useEffect(() => {
-    fetchStoreSetting<{ usd_to_syp?: number }>('exchange_rate').then((setting) => {
-      if (setting && setting.usd_to_syp && typeof setting.usd_to_syp === 'number') {
-        setExchangeRate(setting.usd_to_syp);
-      }
-    }).catch(() => {});
-
-    fetchStoreSetting<ProfitMarginConfig>('profit_margin').then((profitSetting) => {
-      if (profitSetting && typeof profitSetting.percentage === 'number') {
-        setProfitMarginConfig(profitSetting);
-      }
-    }).catch(() => {});
-
-    // Sync Store Banners from Neon DB / API
-    fetchStoreSetting<StoreBanner[]>('store_banners').then((savedBanners) => {
-      if (savedBanners && Array.isArray(savedBanners) && savedBanners.length > 0) {
-        setBanners(savedBanners);
-        saveBannersLocally(savedBanners);
-      }
-    }).catch(() => {});
-
-    if (currentUser && currentUser.id) {
-      refreshUserOrders();
-    }
-  }, [currentUser?.id, refreshUserOrders]);
+  }, []);
 
   // Handle saving and persisting store banners
   const handleSaveBanners = useCallback((updatedBanners: StoreBanner[]) => {
@@ -177,7 +168,7 @@ export default function App() {
     saveStoreSetting('store_banners', updatedBanners);
   }, []);
 
-  // Load Merchant info
+  // Load Merchant info (does not mutate currentUser)
   const loadMerchantData = useCallback(async () => {
     setIsLoadingMerchant(true);
     try {
@@ -210,21 +201,122 @@ export default function App() {
     }
   }, []);
 
-  // Initial load & product sync listener
+  // 1. Initial load on entry to website (Runs strictly ONCE upon entering)
   useEffect(() => {
+    // Sync store settings
+    fetchStoreSetting<{ usd_to_syp?: number }>('exchange_rate').then((setting) => {
+      if (setting && setting.usd_to_syp && typeof setting.usd_to_syp === 'number') {
+        setExchangeRate(setting.usd_to_syp);
+      }
+    }).catch(() => {});
+
+    fetchStoreSetting<ProfitMarginConfig>('profit_margin').then((profitSetting) => {
+      if (profitSetting && typeof profitSetting.percentage === 'number') {
+        setProfitMarginConfig(profitSetting);
+      }
+    }).catch(() => {});
+
+    fetchStoreSetting<StoreBanner[]>('store_banners').then((savedBanners) => {
+      if (savedBanners && Array.isArray(savedBanners) && savedBanners.length > 0) {
+        setBanners(savedBanners);
+        saveBannersLocally(savedBanners);
+      }
+    }).catch(() => {});
+
+    // Sync site maintenance settings
+    fetchStoreSetting<MaintenanceSettings>('site_maintenance', DEFAULT_MAINTENANCE_SETTINGS).then((savedMaintenance) => {
+      if (savedMaintenance) {
+        setMaintenanceSettings(savedMaintenance);
+      }
+    }).catch(() => {});
+
+    // Initial load of merchant and products
     loadMerchantData();
     loadProductsData();
+
+    // User data update: strictly ONCE upon entering the website
+    if (!hasSyncedUserOnEntryRef.current) {
+      hasSyncedUserOnEntryRef.current = true;
+      const initialUser = currentUserRef.current;
+      if (initialUser && (initialUser.id || initialUser.email)) {
+        refreshUserOrders(initialUser.id);
+        fetchUserProfile(initialUser.id || initialUser.email)
+          .then((freshUser) => {
+            if (freshUser) {
+              setCurrentUser(freshUser);
+            }
+          })
+          .catch((e) => console.warn('Could not sync user profile from DB on entry:', e));
+      }
+    }
 
     const handleProductsSynced = () => {
       loadProductsData();
       setProfitMarginVersion((v) => v + 1);
     };
 
+    const handleMaintenanceSynced = (e: any) => {
+      if (e?.detail) {
+        setMaintenanceSettings(e.detail);
+      } else {
+        fetchStoreSetting<MaintenanceSettings>('site_maintenance', DEFAULT_MAINTENANCE_SETTINGS).then((data) => {
+          if (data) setMaintenanceSettings(data);
+        });
+      }
+    };
+
     window.addEventListener('nexen-products-synced', handleProductsSynced);
+    window.addEventListener('nexen-maintenance-changed', handleMaintenanceSynced);
     return () => {
       window.removeEventListener('nexen-products-synced', handleProductsSynced);
+      window.removeEventListener('nexen-maintenance-changed', handleMaintenanceSynced);
     };
-  }, [loadMerchantData, loadProductsData]);
+  }, [loadMerchantData, loadProductsData, refreshUserOrders]);
+
+  // Unified Pull to Refresh handler (السحب للتحديث أو النقر للتحديث)
+  const handlePullRefresh = useCallback(async () => {
+    setIsPullRefreshing(true);
+    try {
+      const user = currentUserRef.current;
+      if (user && (user.id || user.email)) {
+        try {
+          const freshUser = await fetchUserProfile(user.id || user.email);
+          if (freshUser) {
+            setCurrentUser(freshUser);
+          }
+          if (user.id) {
+            await refreshUserOrders(user.id);
+          }
+        } catch (e) {
+          console.warn('Pull-to-refresh user sync error:', e);
+        }
+      }
+
+      await Promise.allSettled([
+        loadMerchantData(),
+        loadProductsData(),
+        fetchStoreSetting<{ usd_to_syp?: number }>('exchange_rate').then((setting) => {
+          if (setting && setting.usd_to_syp && typeof setting.usd_to_syp === 'number') {
+            setExchangeRate(setting.usd_to_syp);
+          }
+        }),
+        fetchStoreSetting<ProfitMarginConfig>('profit_margin').then((profitSetting) => {
+          if (profitSetting && typeof profitSetting.percentage === 'number') {
+            setProfitMarginConfig(profitSetting);
+          }
+        }),
+      ]);
+    } catch (err) {
+      console.error('Error during pull-to-refresh:', err);
+    } finally {
+      setIsPullRefreshing(false);
+    }
+  }, [loadMerchantData, loadProductsData, refreshUserOrders]);
+
+  // Check admin status and maintenance locking
+  const isAdmin = isUserAdmin(currentUser);
+  const isMaintenanceActive = !!maintenanceSettings?.isEnabled;
+  const isLockedForCurrentUser = isMaintenanceActive && !isAdmin;
 
   // Handle Splash Screen completion
   const handleSplashComplete = useCallback(() => {
@@ -240,6 +332,10 @@ export default function App() {
 
   // Handle product selection (Enforce login before checkout, navigate to dedicated checkout screen)
   const handleSelectProduct = useCallback((product: Product, options?: OrderOptions) => {
+    if (isLockedForCurrentUser) {
+      alert('الموقع في وضع الصيانة حالياً - تم إيقاف الطلبات مؤقتاً.');
+      return;
+    }
     setSelectedOrderOptions(options || null);
     if (!currentUser) {
       setPendingProductForAuth(product);
@@ -250,7 +346,7 @@ export default function App() {
       setActiveTab('checkout');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  }, [currentUser]);
+  }, [currentUser, isLockedForCurrentUser]);
 
   // Handle successful login from full-page view
   const handleLoginSuccess = useCallback((user: CustomerUser, userOrders?: OrderItem[]) => {
@@ -301,9 +397,13 @@ export default function App() {
 
   // Navigation callbacks
   const handleNavigate = useCallback((tab: any) => {
+    if (isLockedForCurrentUser && (tab === 'checkout' || tab === 'orders')) {
+      alert('الموقع في وضع الصيانة حالياً - تم قفل هذه الصفحة مؤقتاً.');
+      return;
+    }
     setActiveTab(tab);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+  }, [isLockedForCurrentUser]);
 
   const handleNavigateHome = useCallback(() => {
     setSelectedProductForOrder(null);
@@ -313,16 +413,23 @@ export default function App() {
   }, []);
 
   const handleNavigateOrders = useCallback(() => {
+    if (isLockedForCurrentUser) {
+      alert('الموقع في وضع الصيانة حالياً - قسم الطلبات مقفل مؤقتاً.');
+      return;
+    }
     setActiveTab('orders');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+  }, [isLockedForCurrentUser]);
 
   const handleNavigateSettings = useCallback(() => {
     setActiveTab('settings');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  const handleNavigateAdmin = useCallback(() => {
+  const handleNavigateAdmin = useCallback((targetTab?: 'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance') => {
+    if (targetTab) {
+      setAdminInitialTab(targetTab);
+    }
     setActiveTab('admin');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
@@ -340,7 +447,14 @@ export default function App() {
   const handleCloseSidebar = useCallback(() => setIsSidebarOpen(false), []);
 
   // Deposit modal helpers
-  const handleOpenDeposit = useCallback(() => setIsDepositModalOpen(true), []);
+  const handleOpenDeposit = useCallback(() => {
+    if (isLockedForCurrentUser) {
+      alert('الموقع في وضع الصيانة حالياً - عمليات الإيداع متوقفة مؤقتاً.');
+      return;
+    }
+    setIsDepositModalOpen(true);
+  }, [isLockedForCurrentUser]);
+
   const handleCloseDeposit = useCallback(() => setIsDepositModalOpen(false), []);
   const handleDepositSuccess = useCallback(async () => {
     if (currentUser) {
@@ -392,11 +506,16 @@ export default function App() {
         onOpenSettings={handleNavigateSettings}
         onOpenSidebar={handleOpenSidebar}
         onOpenDeposit={handleOpenDeposit}
+        onPullRefresh={handlePullRefresh}
+        isRefreshing={isPullRefreshing}
         activeTab={activeTab}
         setActiveTab={handleNavigate}
         ordersCount={orders.length}
         theme={theme}
         onToggleTheme={handleToggleTheme}
+        isMaintenanceActive={isMaintenanceActive}
+        isAdmin={isAdmin}
+        onNavigateAdminMaintenance={() => handleNavigateAdmin('maintenance')}
       />
 
       {/* Sidebar / Drawer Navigation Overlay */}
@@ -415,82 +534,106 @@ export default function App() {
         theme={theme}
         onToggleTheme={handleToggleTheme}
         ordersCount={orders.length}
+        isMaintenanceActive={isMaintenanceActive}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-8 py-6 sm:py-8 pb-28 sm:pb-32">
-        {activeTab === 'products' ? (
-          <ProductGrid
-            key={`products-grid-${profitMarginVersion}`}
-            products={products}
-            isLoading={isLoadingProducts}
-            error={productsError}
-            onRefresh={loadProductsData}
-            onSelectProduct={handleSelectProduct}
-            banners={banners}
-            onOpenBannerManager={handleOpenBannerManager}
-            currentUser={currentUser}
-            onOpenDeposit={handleOpenDeposit}
-          />
-        ) : activeTab === 'orders' || activeTab === 'track' ? (
-          <OrdersHistoryPage
-            currentUser={currentUser}
-            orders={orders}
-            onRefreshOrders={refreshUserOrders}
-            onNavigateHome={handleNavigateHome}
-            onOpenAuth={handleOpenAuth}
-            initialQuery={trackingOrderId}
-          />
-        ) : activeTab === 'about' ? (
-          <AboutPage
-            onNavigateHome={handleNavigateHome}
-          />
-        ) : activeTab === 'settings' ? (
-          <SettingsPage
-            currentUser={currentUser}
-            merchantInfo={merchantInfo}
-            theme={theme}
-            onToggleTheme={handleToggleTheme}
-            onOpenAuth={handleOpenAuth}
-            onLogout={handleLogout}
-            onDeleteAccount={handleDeleteAccount}
-            onNavigateHome={handleNavigateHome}
-            onNavigateOrders={handleNavigateOrders}
-            onRefreshMerchant={loadMerchantData}
-            isLoadingMerchant={isLoadingMerchant}
-            onOpenAdmin={handleNavigateAdmin}
-          />
-        ) : activeTab === 'admin' ? (
-          <AdminDashboard
-            currentUser={currentUser}
-            merchantInfo={merchantInfo}
-            onRefreshMerchant={loadMerchantData}
-            isLoadingMerchant={isLoadingMerchant}
-            onOpenBannerManager={handleOpenBannerManager}
-            onRefreshProducts={loadProductsData}
-            onNavigateHome={handleNavigateHome}
-            onNavigateSettings={handleNavigateSettings}
-          />
-        ) : activeTab === 'auth' ? (
-          <AuthPage
-            onLoginSuccess={handleLoginSuccess}
-            onBackToStore={handleNavigateHome}
-            pendingProduct={pendingProductForAuth}
-            initialMode={authMode}
-            theme={theme}
-          />
-        ) : activeTab === 'checkout' && selectedProductForOrder ? (
-          <CheckoutPage
-            product={selectedProductForOrder}
-            currentUser={currentUser}
-            orderOptions={selectedOrderOptions}
-            onBack={handleNavigateHome}
-            onOrderSuccess={handleOrderSuccess}
-            onNavigateToTracking={handleNavigateToTracking}
-            onNavigateHome={handleNavigateHome}
-          />
-        ) : null}
-      </main>
+      {/* Pull To Refresh Wrapped Main Content */}
+      <PullToRefresh onRefresh={handlePullRefresh}>
+        {/* Main Content Area */}
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-8 py-6 sm:py-8 pb-28 sm:pb-32 min-h-[calc(100vh-140px)]">
+          {activeTab === 'products' ? (
+            isLockedForCurrentUser ? (
+              <MaintenanceScreen
+                settings={maintenanceSettings}
+                currentUser={currentUser}
+              />
+            ) : (
+              <ProductGrid
+                key={`products-grid-${profitMarginVersion}`}
+                products={products}
+                isLoading={isLoadingProducts}
+                error={productsError}
+                onRefresh={loadProductsData}
+                onSelectProduct={handleSelectProduct}
+                banners={banners}
+                onOpenBannerManager={handleOpenBannerManager}
+              />
+            )
+          ) : activeTab === 'orders' || activeTab === 'track' ? (
+            isLockedForCurrentUser ? (
+              <MaintenanceScreen
+                settings={maintenanceSettings}
+                currentUser={currentUser}
+              />
+            ) : (
+              <OrdersHistoryPage
+                currentUser={currentUser}
+                orders={orders}
+                onRefreshOrders={refreshUserOrders}
+                onNavigateHome={handleNavigateHome}
+                onOpenAuth={handleOpenAuth}
+                initialQuery={trackingOrderId}
+              />
+            )
+          ) : activeTab === 'about' ? (
+            <AboutPage
+              onNavigateHome={handleNavigateHome}
+            />
+          ) : activeTab === 'settings' ? (
+            <SettingsPage
+              currentUser={currentUser}
+              merchantInfo={merchantInfo}
+              theme={theme}
+              onToggleTheme={handleToggleTheme}
+              onOpenAuth={handleOpenAuth}
+              onLogout={handleLogout}
+              onDeleteAccount={handleDeleteAccount}
+              onNavigateHome={handleNavigateHome}
+              onNavigateOrders={handleNavigateOrders}
+              onRefreshMerchant={loadMerchantData}
+              isLoadingMerchant={isLoadingMerchant}
+              onOpenAdmin={handleNavigateAdmin}
+            />
+          ) : activeTab === 'admin' ? (
+            <AdminDashboard
+              currentUser={currentUser}
+              merchantInfo={merchantInfo}
+              onRefreshMerchant={loadMerchantData}
+              isLoadingMerchant={isLoadingMerchant}
+              onOpenBannerManager={handleOpenBannerManager}
+              onRefreshProducts={loadProductsData}
+              onNavigateHome={handleNavigateHome}
+              onNavigateSettings={handleNavigateSettings}
+              initialTab={adminInitialTab}
+              onMaintenanceChange={(updated) => setMaintenanceSettings(updated)}
+            />
+          ) : activeTab === 'auth' ? (
+            <AuthPage
+              onLoginSuccess={handleLoginSuccess}
+              onBackToStore={handleNavigateHome}
+              pendingProduct={pendingProductForAuth}
+              initialMode={authMode}
+              theme={theme}
+            />
+          ) : activeTab === 'checkout' && selectedProductForOrder && !isLockedForCurrentUser ? (
+            <CheckoutPage
+              product={selectedProductForOrder}
+              currentUser={currentUser}
+              orderOptions={selectedOrderOptions}
+              onBack={handleNavigateHome}
+              onOrderSuccess={handleOrderSuccess}
+              onNavigateToTracking={handleNavigateToTracking}
+              onNavigateHome={handleNavigateHome}
+              onNavigateAdmin={(tab) => handleNavigateAdmin(tab as any)}
+            />
+          ) : isLockedForCurrentUser ? (
+            <MaintenanceScreen
+              settings={maintenanceSettings}
+              currentUser={currentUser}
+            />
+          ) : null}
+        </main>
+      </PullToRefresh>
 
       {/* Bottom Floating Navigation Bar (Clean 3-item layout: Home, Orders, Account) */}
       <BottomNav
@@ -504,6 +647,7 @@ export default function App() {
         onOpenSettings={handleNavigateSettings}
         ordersCount={orders.length}
         isLoggedIn={!!currentUser}
+        isMaintenanceLocked={isLockedForCurrentUser}
       />
 
       {/* Banner Upload & Management Modal */}

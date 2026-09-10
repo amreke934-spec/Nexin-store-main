@@ -11,12 +11,9 @@ import {
   Calendar,
   Copy,
   Check,
-  ShieldAlert,
-  Sliders,
-  ArrowRight,
 } from 'lucide-react';
 import { CustomerUser, MerchantInfo } from '../types';
-import { ADMIN_AUTHORIZED_EMAIL } from './AdminDashboard';
+import { isUserAdmin } from '../utils/adminUtils';
 
 interface SettingsPageProps {
   currentUser: CustomerUser | null;
@@ -37,14 +34,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = React.memo(({
   currentUser,
   onOpenAuth,
   onLogout,
-  onOpenAdmin,
 }) => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Check if current logged-in user is the authorized admin
-  const isAdminUser =
-    currentUser?.email?.toLowerCase().trim() === ADMIN_AUTHORIZED_EMAIL.toLowerCase().trim() ||
-    currentUser?.role === 'admin';
+  const isAdminUser = isUserAdmin(currentUser);
 
   // Helper to copy text with quick feedback
   const handleCopy = (text: string, fieldId: string) => {
@@ -73,7 +67,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = React.memo(({
               الإعدادات والتفضيلات
             </h1>
             <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1.5 leading-relaxed">
-              إدارة تفاصيل الحساب الشخصي، الصلاحيات الإدارية، وتسجيل الدخول.
+              إدارة تفاصيل الحساب الشخصي وتسجيل الدخول.
             </p>
           </div>
         </div>
@@ -81,48 +75,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = React.memo(({
         {/* 2. USER ACCOUNT DETAILS (SHOWN ONLY IF LOGGED IN) */}
         {isLoggedIn ? (
           <div className="space-y-6 pt-2">
-            {/* ADMIN EXCLUSIVE SECTION (Rendered only for m74321176@gmail.com) */}
-            {isAdminUser && onOpenAdmin && (
-              <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-purple-900 via-[#7F00FF] to-indigo-800 text-white shadow-xl space-y-4 border border-purple-400/30 relative overflow-hidden animate-in fade-in duration-300">
-                <div className="absolute top-0 right-0 w-48 h-48 bg-white/10 rounded-full blur-2xl pointer-events-none" />
-                <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-white/20 border border-white/30 text-white flex items-center justify-center shadow-md shrink-0 backdrop-blur-md">
-                      <ShieldAlert className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-[10px] font-extrabold uppercase bg-white/20 text-white px-2 py-0.5 rounded-full border border-white/30">
-                          صلاحية المدير العام
-                        </span>
-                        <span className="text-[10px] text-emerald-300 font-mono flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          {ADMIN_AUTHORIZED_EMAIL}
-                        </span>
-                      </div>
-                      <h3 className="text-base sm:text-lg font-black text-white">
-                        لوحة تحكم المدير والإحصائيات
-                      </h3>
-                      <p className="text-xs text-purple-100 mt-0.5">
-                        الإحصائيات، إدارة المستخدمين، الحساب التجاري، نسبة الربح الشاملة، والتحقق من الطلبات
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    id="open-admin-dashboard-btn"
-                    onClick={onOpenAdmin}
-                    className="px-5 py-3 rounded-2xl bg-white text-[#7F00FF] hover:bg-purple-50 active:scale-95 text-xs sm:text-sm font-black transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer shrink-0"
-                  >
-                    <Sliders className="w-4 h-4" />
-                    <span>فتح لوحة التحكم</span>
-                    <ArrowRight className="w-4 h-4 mr-0.5" />
-                  </button>
-                </div>
-              </div>
-            )}
-
             {/* Logged in Badge */}
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">

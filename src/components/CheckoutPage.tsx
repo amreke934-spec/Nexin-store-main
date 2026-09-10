@@ -22,6 +22,8 @@ import { saveOrderToDb } from '../services/dbApi';
 import { getProductFieldMetadata, getProductServiceType } from '../utils/productUtils';
 import { convertToSyp, formatSypNumber } from '../utils/currencyUtils';
 import { useProfitMargin } from '../utils/profitUtils';
+import { normalizeSyrianPhoneNumber, detectSyrianNetwork } from '../utils/searchUtils';
+import { isUserAdmin } from '../utils/adminUtils';
 
 interface CheckoutPageProps {
   product: Product;
@@ -31,6 +33,7 @@ interface CheckoutPageProps {
   onOrderSuccess: (order: OrderItem) => void;
   onNavigateToTracking: (orderId: string) => void;
   onNavigateHome: () => void;
+  onNavigateAdmin?: (tab?: string) => void;
 }
 
 export const CheckoutPage: React.FC<CheckoutPageProps> = ({
@@ -41,6 +44,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   onOrderSuccess,
   onNavigateToTracking,
   onNavigateHome,
+  onNavigateAdmin,
 }) => {
   // Subscribe to profit margin updates in real-time
   useProfitMargin();
@@ -49,6 +53,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   const [dynamicFields, setDynamicFields] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<{
+    message: string;
+    supplierError?: string;
+    isApiKeyError?: boolean;
+    suggestedAction?: string;
+  } | null>(null);
   const [successOrder, setSuccessOrder] = useState<OrderItem | null>(null);
   const [copiedId, setCopiedId] = useState<boolean>(false);
 
@@ -114,29 +124,53 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
 
     try {
       const cleanedFields = { ...dynamicFields };
-      const mainVal = dynamicFields[fieldMeta.primaryFieldName] || dynamicFields['Player_ID'] || Object.values(dynamicFields)[0] || '';
+      const mainVal = dynamicFields[fieldMeta.primaryFieldName] || dynamicFields['phone_number'] || dynamicFields['wallet'] || dynamicFields['Player_ID'] || Object.values(dynamicFields)[0] || '';
 
       if (serviceType === 'cash' || serviceType === 'telecom') {
-        cleanedFields['phone_number'] = mainVal;
-        cleanedFields['mobile'] = mainVal;
-        cleanedFields['Player_ID'] = mainVal;
+        const normPhone = normalizeSyrianPhoneNumber(mainVal);
+        cleanedFields['phone_number'] = normPhone;
+        cleanedFields['mobile'] = normPhone;
+        cleanedFields['wallet'] = normPhone;
+        cleanedFields['Player_ID'] = normPhone;
       } else {
         cleanedFields['Player_ID'] = mainVal;
       }
 
       let payload: any;
       if (product.isCash || product.sectionKey === 'cashbalances' || (product as any).cashType) {
+        const resolvedType = String((product as any).cashType || '').toLowerCase();
+        const normalizedCashType = (resolvedType.includes('mtn') || product.name?.toLowerCase().includes('mtn'))
+          ? 'mtn_cash'
+          : 'syriatel_cash';
+
+        const cashAmount = Number(cleanedFields['amount'] || qty || product.price);
+        const cashWallet = cleanedFields['wallet'] || cleanedFields['phone_number'] || cleanedFields['Player_ID'] || '';
+
         payload = {
-          cashType: (product as any).cashType || 'syriatel-cash',
-          amount: Number(cleanedFields['amount'] || qty || product.price),
-          wallet: cleanedFields['wallet'] || cleanedFields['phone_number'] || cleanedFields['Player_ID'] || '',
+          cashType: normalizedCashType,
+          amount: cashAmount,
+          wallet: cashWallet,
           dynamicFields: cleanedFields,
+          userId: currentUser?.id,
+          userEmail: currentUser?.email,
+          customerName: currentUser?.name,
+          productName: product.name,
+          category: product.category,
+          price: cashAmount,
+          currency: product.currency || 'SYP',
         };
       } else {
         payload = {
           productId: product.productId,
           qty: qty,
           dynamicFields: cleanedFields,
+          userId: currentUser?.id,
+          userEmail: currentUser?.email,
+          customerName: currentUser?.name,
+          productName: product.name,
+          category: product.category,
+          price: product.price,
+          currency: product.currency || 'USD',
         };
       }
 
@@ -169,10 +203,19 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
         // Persist order in DB
         saveOrderToDb(newOrder, currentUser?.id).catch((e) => console.warn('Order DB persist notice:', e));
       } else {
-        setError(result.error || 'فشلت عملية إنشاء الطلب، يرجى التحقق من الرصيد والبيانات المدخلة.');
+        const errorMsg = result.error || 'فشلت عملية إنشاء الطلب، يرجى التحقق من الرصيد والبيانات المدخلة.';
+        setError(errorMsg);
+        setErrorDetails({
+          message: errorMsg,
+          supplierError: result.supplierError,
+          isApiKeyError: result.isApiKeyError,
+          suggestedAction: result.suggestedAction,
+        });
       }
     } catch (err: any) {
-      setError(err.message || 'حدث خطأ غير متوقع أثناء معالجة الطلب.');
+      const msg = err.message || 'حدث خطأ غير متوقع أثناء معالجة الطلب.';
+      setError(msg);
+      setErrorDetails({ message: msg });
     } finally {
       setIsSubmitting(false);
     }
@@ -184,9 +227,32 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     setTimeout(() => setCopiedId(false), 2500);
   };
 
-  const totalRawPrice = product.isAmount ? product.price * qty : product.price;
+  const isCashProduct = Boolean(product.isCash || product.sectionKey === 'cashbalances' || (product as any).cashType);
+  const enteredAmount = isCashProduct
+    ? Number(dynamicFields['amount'] || qty || product.price)
+    : product.isAmount
+    ? product.price * qty
+    : product.price;
+
+  const totalRawPrice = enteredAmount;
   const totalSypAmount = convertToSyp(totalRawPrice, product.currency || 'USD');
   const formattedTotalPrice = `${formatSypNumber(totalSypAmount)} ل.س`;
+
+  // Network operator mismatch check
+  const enteredPhone = dynamicFields['phone_number'] || dynamicFields['wallet'] || dynamicFields[fieldMeta.primaryFieldName] || dynamicFields['Player_ID'] || '';
+  const detectedNet = detectSyrianNetwork(enteredPhone);
+  const isSyriatelService = product.sectionKey === 'syriatel' || product.category?.includes('سيريتل') || (product as any).cashType === 'syriatel_cash' || product.name?.includes('سيريتل');
+  const isMtnService = product.sectionKey === 'mtn' || product.category?.includes('MTN') || (product as any).cashType === 'mtn_cash' || product.name?.toLowerCase().includes('mtn');
+
+  const networkMismatchNotice = (() => {
+    if (detectedNet === 'mtn' && isSyriatelService) {
+      return 'تنبيه: الرقم المدخل يبدو تابعاً لشبكة MTN، بينما الخدمة المحددة هي سيريتل. يرجى التأكد لتجنب فشل الشحن.';
+    }
+    if (detectedNet === 'syriatel' && isMtnService) {
+      return 'تنبيه: الرقم المدخل يبدو تابعاً لشبكة سيريتل، بينما الخدمة المحددة هي MTN. يرجى التأكد لتجنب فشل الشحن.';
+    }
+    return null;
+  })();
 
   const renderFieldIcon = () => {
     switch (fieldMeta.iconType) {
@@ -425,8 +491,16 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                 </div>
               )}
 
-              {/* Quantity selector if isAmount */}
-              {product.isAmount && (
+              {/* Network Operator Mismatch Warning */}
+              {networkMismatchNotice && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-2 text-amber-600 dark:text-amber-400 text-xs font-bold animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{networkMismatchNotice}</span>
+                </div>
+              )}
+
+              {/* Quantity selector if isAmount (only for non-cash token products) */}
+              {product.isAmount && !isCashProduct && (
                 <div className="space-y-1.5 text-right pt-1">
                   <label className="block text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
                     الكمية المطلوبة (الحد الأدنى: {product.minQty || 1})
@@ -461,9 +535,35 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
 
             {/* Error Banner */}
             {error && (
-              <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-300 text-xs sm:text-sm p-4 rounded-2xl flex items-center gap-2.5 animate-in shake">
-                <AlertCircle className="w-5 h-5 shrink-0 text-red-500" />
-                <span>{error}</span>
+              <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-300 text-xs sm:text-sm p-4 rounded-2xl space-y-3 animate-in shake">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 shrink-0 text-red-500 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold leading-relaxed">{error}</p>
+                    {errorDetails?.supplierError && !error.includes(errorDetails.supplierError) && (
+                      <p className="text-[11px] text-red-600/90 dark:text-red-400/90">
+                        استجابة المزود الخارجي: {errorDetails.supplierError}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Admin Quick Action if API key is invalid */}
+                {errorDetails?.isApiKeyError && isUserAdmin(currentUser) && onNavigateAdmin && (
+                  <div className="pt-2 border-t border-red-200/60 dark:border-red-900/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                    <p className="text-[11px] text-red-800 dark:text-red-200 font-medium">
+                      تنبيه للإدارة: مفتاح الربط مع المزود الخارجي معطّل أو انتهت صلاحيته في إعدادات المتجر. يمكنك تحديثه فوراً من لوحة التحكم.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => onNavigateAdmin('merchant')}
+                      className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm shrink-0 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span>تحديث مفتاح المزود</span>
+                      <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Settings, Package, LayoutGrid, Menu, Info, LogIn, Wallet } from 'lucide-react';
+import React, { useState } from 'react';
+import { Settings, Package, LayoutGrid, Menu, Info, LogIn, Wallet, RefreshCw, Lock, AlertTriangle } from 'lucide-react';
 import { MerchantInfo, CustomerUser } from '../types';
 
 interface NavbarProps {
@@ -12,11 +12,16 @@ interface NavbarProps {
   onOpenSettings?: () => void;
   onOpenSidebar: () => void;
   onOpenDeposit?: () => void;
+  onPullRefresh?: () => void;
+  isRefreshing?: boolean;
   activeTab: 'products' | 'orders' | 'track' | 'settings' | 'history' | 'auth' | 'admin' | 'about' | string;
   setActiveTab: (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about') => void;
   ordersCount: number;
   theme?: 'light' | 'dark';
   onToggleTheme?: (newTheme: 'light' | 'dark') => void;
+  isMaintenanceActive?: boolean;
+  isAdmin?: boolean;
+  onNavigateAdminMaintenance?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = React.memo(({
@@ -24,14 +29,56 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
   onOpenAuth,
   onOpenSidebar,
   onOpenDeposit,
+  onPullRefresh,
+  isRefreshing,
   activeTab,
   setActiveTab,
   ordersCount,
+  isMaintenanceActive = false,
+  isAdmin = false,
+  onNavigateAdminMaintenance,
 }) => {
+  const [maintenanceToast, setMaintenanceToast] = useState(false);
+
+  const handleDepositClick = () => {
+    if (isMaintenanceActive && !isAdmin) {
+      setMaintenanceToast(true);
+      setTimeout(() => setMaintenanceToast(false), 2600);
+      return;
+    }
+    onOpenDeposit?.();
+  };
+
   return (
     <header className="sticky top-0 z-40 glass-header shadow-xs transition-colors">
+      {/* Admin Maintenance Notice Banner */}
+      {isMaintenanceActive && isAdmin && (
+        <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 text-white text-[11px] sm:text-xs py-1.5 px-3 sm:px-6 text-center font-bold flex items-center justify-center gap-2 shadow-sm border-b border-amber-500/30">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 animate-bounce" />
+          <span>وضع الصيانة مفعّل حالياً للزوار والمستخدمين (أنت تعمل بكامل صلاحيات الأدمن)</span>
+          {onNavigateAdminMaintenance && (
+            <button
+              type="button"
+              onClick={onNavigateAdminMaintenance}
+              className="mr-2 px-2 py-0.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-[10px] sm:text-[11px] font-bold cursor-pointer transition-all active:scale-95"
+            >
+              إدارة الصيانة
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Floating toast if non-admin clicks locked action */}
+      {maintenanceToast && (
+        <div className="bg-amber-500 text-slate-950 font-bold text-xs py-1 px-4 text-center flex items-center justify-center gap-1.5 animate-in fade-in">
+          <Lock className="w-3.5 h-3.5 shrink-0" />
+          <span>الموقع في وضع الصيانة حالياً - عمليات الإيداع متوقفة مؤقتاً</span>
+        </div>
+      )}
+
       {/* Main Navigation Bar */}
       <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3">
+
         <div className="flex items-center justify-between gap-2 sm:gap-4">
           
           {/* 1. Sidebar Trigger & Store Name (Clean & Minimalist, No Logo) */}
@@ -70,16 +117,25 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
 
               <button
                 id="nav-orders-tab"
-                onClick={() => setActiveTab('orders')}
+                onClick={() => {
+                  if (isMaintenanceActive && !isAdmin) {
+                    setMaintenanceToast(true);
+                    setTimeout(() => setMaintenanceToast(false), 2600);
+                    return;
+                  }
+                  setActiveTab('orders');
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                   activeTab === 'orders' || activeTab === 'track'
                     ? 'bg-white dark:bg-[#7F00FF] text-[#7F00FF] dark:text-white shadow-xs'
+                    : isMaintenanceActive && !isAdmin
+                    ? 'text-slate-400 dark:text-slate-600'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <Package className="w-3.5 h-3.5" />
+                {isMaintenanceActive && !isAdmin ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <Package className="w-3.5 h-3.5" />}
                 <span>سجل الطلبات</span>
-                {ordersCount > 0 && (
+                {ordersCount > 0 && !isMaintenanceActive && (
                   <span className="bg-purple-100 dark:bg-purple-900/60 text-[#7F00FF] dark:text-purple-300 text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">
                     {ordersCount}
                   </span>
@@ -102,14 +158,23 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
               {currentUser && (
                 <button
                   id="nav-settings-tab"
-                  onClick={() => setActiveTab('settings')}
+                  onClick={() => {
+                    if (isMaintenanceActive && !isAdmin) {
+                      setMaintenanceToast(true);
+                      setTimeout(() => setMaintenanceToast(false), 2600);
+                      return;
+                    }
+                    setActiveTab('settings');
+                  }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                     activeTab === 'settings'
                       ? 'bg-white dark:bg-[#7F00FF] text-[#7F00FF] dark:text-white shadow-xs'
+                      : isMaintenanceActive && !isAdmin
+                      ? 'text-slate-400 dark:text-slate-600'
                       : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  <Settings className="w-3.5 h-3.5" />
+                  {isMaintenanceActive && !isAdmin ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <Settings className="w-3.5 h-3.5" />}
                   <span>الإعدادات</span>
                 </button>
               )}
@@ -118,17 +183,40 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
 
           {/* 2. RIGHT: Clean Quick Action (Login / Profile if needed, or simple direct indicator) */}
           <div className="flex items-center gap-2">
+            {onPullRefresh && (
+              <button
+                id="nav-quick-refresh-btn"
+                type="button"
+                onClick={onPullRefresh}
+                disabled={isRefreshing}
+                className={`p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-all cursor-pointer ${
+                  isRefreshing ? 'opacity-60 cursor-wait' : 'active:scale-95'
+                }`}
+                title="تحديث البيانات (يدعم أيضاً السحب للأسفل من أعلى الشاشة)"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-[#7F00FF] dark:text-purple-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+              </button>
+            )}
+
             {currentUser ? (
               <div className="flex items-center gap-1.5 sm:gap-2">
                 {onOpenDeposit && (
                   <button
                     id="nav-deposit-btn"
                     type="button"
-                    onClick={onOpenDeposit}
-                    className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-[#7F00FF] hover:brightness-110 active:scale-98 text-white px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs shadow-emerald-600/20 cursor-pointer whitespace-nowrap"
-                    title="إيداع وشحن الرصيد"
+                    onClick={handleDepositClick}
+                    className={`flex items-center gap-1.5 text-white px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer whitespace-nowrap ${
+                      isMaintenanceActive && !isAdmin
+                        ? 'bg-slate-700 opacity-60'
+                        : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-[#7F00FF] hover:brightness-110 active:scale-98 shadow-emerald-600/20'
+                    }`}
+                    title={isMaintenanceActive && !isAdmin ? 'الإيداع متوقف أثناء الصيانة' : 'إيداع وشحن الرصيد'}
                   >
-                    <Wallet className="w-3.5 h-3.5" />
+                    {isMaintenanceActive && !isAdmin ? (
+                      <Lock className="w-3.5 h-3.5 text-amber-300" />
+                    ) : (
+                      <Wallet className="w-3.5 h-3.5" />
+                    )}
                     <span>إيداع</span>
                   </button>
                 )}

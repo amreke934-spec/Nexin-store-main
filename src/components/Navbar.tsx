@@ -200,27 +200,6 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
 
             {currentUser ? (
               <div className="flex items-center gap-1.5 sm:gap-2">
-                {onOpenDeposit && (
-                  <button
-                    id="nav-deposit-btn"
-                    type="button"
-                    onClick={handleDepositClick}
-                    className={`flex items-center gap-1.5 text-white px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer whitespace-nowrap ${
-                      isMaintenanceActive && !isAdmin
-                        ? 'bg-slate-700 opacity-60'
-                        : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-[#7F00FF] hover:brightness-110 active:scale-98 shadow-emerald-600/20'
-                    }`}
-                    title={isMaintenanceActive && !isAdmin ? 'الإيداع متوقف أثناء الصيانة' : 'إيداع وشحن الرصيد'}
-                  >
-                    {isMaintenanceActive && !isAdmin ? (
-                      <Lock className="w-3.5 h-3.5 text-amber-300" />
-                    ) : (
-                      <Wallet className="w-3.5 h-3.5" />
-                    )}
-                    <span>إيداع</span>
-                  </button>
-                )}
-
                 <button
                   id="user-profile-btn"
                   onClick={onOpenSidebar}

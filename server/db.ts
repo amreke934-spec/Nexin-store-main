@@ -219,7 +219,7 @@ export async function initializeDatabase(): Promise<{ success: boolean; error?: 
       ON CONFLICT (key) DO NOTHING;
     `);
 
-    // Insert default deposit methods if not present
+    // Insert default deposit methods if not present (only active approved methods, e.g. Sham Cash)
     const defaultDepositMethods = [
       {
         id: 'method_sham_cash',
@@ -235,59 +235,33 @@ export async function initializeDatabase(): Promise<{ success: boolean; error?: 
         feePercentage: 0,
         isActive: true,
         order: 1,
-      },
-      {
-        id: 'method_syriatel_cash',
-        name: 'سيريتل كاش (Syriatel Cash)',
-        currency: 'SYP',
-        exchangeRateToSyp: 1,
-        depositAddress: '0933 654 321',
-        minDeposit: 10000,
-        maxDeposit: 2000000,
-        details: '1. قم بالتحويل من محفظة سيريتل كاش أو عبر طلب الرمز #304* إلى الرقم أعلاه.\n2. بعد استلام رسالة التأكيد من سيريتل كاش، انسخ رقم العملية وضعه في الخانة المخصصة.\n3. سيتم مراجعة الطلب وإيداع الرصيد في حسابك خلال دقائق.',
-        icon: 'https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=128&auto=format&fit=crop&q=80',
-        feeEnabled: false,
-        feePercentage: 0,
-        isActive: true,
-        order: 2,
-      },
-      {
-        id: 'method_usdt_trc20',
-        name: 'USDT (TRC-20)',
-        currency: 'USDT',
-        exchangeRateToSyp: 15000,
-        depositAddress: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t7K9mX',
-        minDeposit: 5,
-        maxDeposit: 1000,
-        details: '1. أرسل عملة USDT حصراً عبر شبكة Tron (TRC-20) إلى عنوان المحفظة أعلاه.\n2. تحذير: لا ترسل أي عملة أخرى أو عبر شبكة مختلفة لتفادي ضياع الأموال.\n3. بعد تأكيد التحويل في محفظتك (Binance / TrustWallet / Bybit)، الصق رمز التجزئة أو رقم المعاملة (TXID).',
-        icon: 'https://cryptologos.cc/logos/tether-usdt-logo.png?v=035',
-        feeEnabled: true,
-        feePercentage: 1.5,
-        isActive: true,
-        order: 3,
-      },
-      {
-        id: 'method_alharam',
-        name: 'شركة الهرم للحوالات',
-        currency: 'SYP',
-        exchangeRateToSyp: 1,
-        depositAddress: 'دمشق - المستلم: متجر نيكسن لخدمات الشحن - هاتف: 0999 888 777',
-        minDeposit: 50000,
-        maxDeposit: 15000000,
-        details: '1. توجه إلى أي فرع من فروع شركة الهرم للحوالات.\n2. أرسل الحوالة بالاسم والرقم الموضح أعلاه.\n3. التقط صورة لإيصال الحوالة واحتفظ به، ثم أدخل رقم إشعار الحوالة المطبوع على الإيصال.',
-        icon: 'https://images.unsplash.com/photo-1580519542036-c47de6196ba5?w=128&auto=format&fit=crop&q=80',
-        feeEnabled: false,
-        feePercentage: 0,
-        isActive: true,
-        order: 4,
       }
     ];
 
-    await client.query(`
-      INSERT INTO store_settings (key, value, updated_at)
-      VALUES ('deposit_methods', $1, NOW())
-      ON CONFLICT (key) DO NOTHING;
-    `, [JSON.stringify(defaultDepositMethods)]);
+    // Check if deposit_methods already exists in store_settings, and purge removed methods
+    const existingMethodsRes = await client.query(
+      `SELECT value FROM store_settings WHERE key = 'deposit_methods'`
+    );
+    if (existingMethodsRes.rows.length > 0 && Array.isArray(existingMethodsRes.rows[0].value)) {
+      const filtered = existingMethodsRes.rows[0].value.filter((m: any) => {
+        const id = m?.id || '';
+        const name = m?.name || '';
+        if (id === 'method_syriatel_cash' || id === 'method_usdt_trc20' || id === 'method_alharam') return false;
+        if (name.includes('سيريتل كاش') || name.includes('USDT') || name.includes('الهرم')) return false;
+        return true;
+      });
+      const finalMethods = filtered.length > 0 ? filtered : defaultDepositMethods;
+      await client.query(
+        `UPDATE store_settings SET value = $1, updated_at = NOW() WHERE key = 'deposit_methods'`,
+        [JSON.stringify(finalMethods)]
+      );
+    } else {
+      await client.query(`
+        INSERT INTO store_settings (key, value, updated_at)
+        VALUES ('deposit_methods', $1, NOW())
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+      `, [JSON.stringify(defaultDepositMethods)]);
+    }
 
 
     return { success: true, message: 'Database tables and columns pushed successfully' };

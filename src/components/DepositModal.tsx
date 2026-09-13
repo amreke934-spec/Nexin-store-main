@@ -76,9 +76,11 @@ export const DepositModal: React.FC<DepositModalProps> = ({
     setIsLoadingMethods(true);
     try {
       const data = await fetchDepositMethods();
-      setMethods(data.filter((m) => m.isActive !== false));
-    } catch (err) {
-      console.error('Error loading deposit methods:', err);
+      if (Array.isArray(data)) {
+        setMethods(data.filter((m) => m.isActive !== false));
+      }
+    } catch {
+      // Fallback is handled inside fetchDepositMethods
     } finally {
       setIsLoadingMethods(false);
     }
@@ -89,9 +91,11 @@ export const DepositModal: React.FC<DepositModalProps> = ({
     setIsLoadingRequests(true);
     try {
       const reqs = await fetchDepositRequests(currentUser.id);
-      setUserRequests(reqs);
-    } catch (err) {
-      console.error('Error loading user deposit requests:', err);
+      if (Array.isArray(reqs)) {
+        setUserRequests(reqs);
+      }
+    } catch {
+      // Safe fallback
     } finally {
       setIsLoadingRequests(false);
     }

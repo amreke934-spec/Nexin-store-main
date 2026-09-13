@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Search, RefreshCw, CheckCircle2, Clock, AlertCircle, XCircle, Copy, Check, Sparkles } from 'lucide-react';
+import { Search, RefreshCw, CheckCircle2, Clock, AlertCircle, XCircle, Copy, Check, Sparkles, Phone, UserCheck } from 'lucide-react';
 import { OrderItem } from '../types';
 import { checkOrdersStatus } from '../services/scStoreApi';
 import { formatPriceSyp } from '../utils/currencyUtils';
+import { extractChargedAccount } from '../utils/orderUtils';
 
 interface OrderTrackingSectionProps {
   initialOrderId?: string;
@@ -259,23 +260,25 @@ export const OrderTrackingSection: React.FC<OrderTrackingSectionProps> = ({
               const badge = getStatusBadge(status);
               const fields = item.dynamicFields || {};
 
+              const charged = extractChargedAccount(fields, item.mobile || item.phone_number || item.Player_ID);
+
               return (
                 <div
                   key={orderId + idx}
-                  className="bg-white dark:bg-[#151221] border border-gray-200/80 dark:border-white/10 rounded-2xl p-4 sm:p-5 shadow-xs hover:border-[#7F00FF]/40 dark:hover:border-purple-500/40 transition-all space-y-4"
+                  className="bg-white dark:bg-[#151221] border border-gray-200/80 dark:border-white/10 rounded-2xl p-4 sm:p-5 shadow-xs hover:border-[#7F00FF]/40 dark:hover:border-purple-500/40 transition-all space-y-3.5"
                 >
-                  {/* Top Bar */}
+                  {/* Top Bar: Unique Order ID + Status */}
                   <div className="flex items-start justify-between gap-2 pb-3 border-b border-gray-100 dark:border-white/10">
                     <div>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-gray-400 dark:text-gray-500">رقم الطلب:</span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500">رقم الطلب الفريد:</span>
                         <strong className="font-mono text-sm text-[#7F00FF] dark:text-purple-400 font-bold">
                           #{orderId}
                         </strong>
                         <button
                           onClick={() => handleCopy(String(orderId))}
                           className="p-1 text-gray-400 hover:text-[#7F00FF] dark:hover:text-purple-300 transition-colors cursor-pointer"
-                          title="نسخ"
+                          title="نسخ رقم الطلب الفريد"
                         >
                           {copiedId === String(orderId) ? (
                             <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -289,75 +292,62 @@ export const OrderTrackingSection: React.FC<OrderTrackingSectionProps> = ({
                       </div>
                     </div>
 
-                    {/* Status Badge */}
+                    {/* 5. حالة الطلب */}
                     <div className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold border ${badge.bg}`}>
                       {badge.icon}
                       <span>{badge.label}</span>
                     </div>
                   </div>
 
-                  {/* Order Details Body */}
-                  <div className="space-y-2 text-xs">
-                    {item.productName && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-500 dark:text-gray-400">المنتج:</span>
-                        <span className="font-bold text-[#1A1A1A] dark:text-white">{item.productName}</span>
-                      </div>
-                    )}
+                  {/* 1. اسم المنتج المشحون */}
+                  {item.productName && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500 dark:text-gray-400 font-medium">اسم المنتج المشحون:</span>
+                      <span className="font-extrabold text-[#1A1A1A] dark:text-white text-sm">{item.productName}</span>
+                    </div>
+                  )}
 
-                    {item.qty && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-500 dark:text-gray-400">الكمية:</span>
-                        <span className="font-bold text-[#1A1A1A] dark:text-white">{item.qty}</span>
-                      </div>
-                    )}
-
-                    {/* Dynamic Fields (e.g. Player_ID, Phone, etc) */}
-                    {(() => {
-                      const getFriendlyFieldLabel = (key: string) => {
-                        const k = key.toLowerCase();
-                        if (k.includes('player') || k === 'player_id') return 'معرف اللاعب (Player ID)';
-                        if (k.includes('phone') || k.includes('mobile') || k === 'phone_number') return 'رقم الهاتف / المحفظة';
-                        if (k.includes('wallet')) return 'رقم المحفظة';
-                        if (k.includes('telegram') || k.includes('tg')) return 'معرف التلغرام';
-                        if (k.includes('email') || k.includes('mail')) return 'البريد الإلكتروني';
-                        return key;
-                      };
-
-                      if (Object.keys(fields).length > 0) {
-                        return Object.entries(fields).map(([k, v]) => (
-                          <div key={k} className="flex justify-between bg-purple-50/50 dark:bg-purple-950/30 p-2 rounded-xl border border-purple-100 dark:border-purple-800/30">
-                            <span className="text-gray-600 dark:text-gray-300">{getFriendlyFieldLabel(k)}:</span>
-                            <span className="font-mono font-bold text-[#7F00FF] dark:text-purple-300">{String(v)}</span>
-                          </div>
-                        ));
-                      } else if (item.Player_ID) {
-                        return (
-                          <div className="flex justify-between bg-purple-50/50 dark:bg-purple-950/30 p-2 rounded-xl border border-purple-100 dark:border-purple-800/30">
-                            <span className="text-gray-600 dark:text-gray-300">معرف الحساب / اللاعب:</span>
-                            <span className="font-mono font-bold text-[#7F00FF] dark:text-purple-300">{item.Player_ID}</span>
-                          </div>
-                        );
-                      } else if (item.mobile || item.phone_number) {
-                        return (
-                          <div className="flex justify-between bg-emerald-50/50 dark:bg-emerald-950/30 p-2 rounded-xl border border-emerald-100 dark:border-emerald-800/30">
-                            <span className="text-gray-600 dark:text-gray-300">رقم الهاتف المحمول:</span>
-                            <span className="font-mono font-bold text-emerald-600 dark:text-emerald-300">{item.mobile || item.phone_number}</span>
-                          </div>
-                        );
-                      }
-                      return null;
-                    })()}
-
-                    {item.total && (
-                      <div className="flex justify-between pt-2 border-t border-gray-100 dark:border-white/10 font-bold">
-                        <span className="text-gray-700 dark:text-gray-300">المبلغ:</span>
-                        <span className="font-mono text-[#7F00FF] dark:text-purple-400">
-                          {formatPriceSyp(typeof item.total === 'number' ? item.total : parseFloat(item.total) || 0, item.currency || 'USD')}
+                  {/* 4. الحساب المشحون رقم هاتف او id */}
+                  <div className="bg-purple-50/40 dark:bg-purple-950/20 border border-purple-100/70 dark:border-purple-900/30 rounded-xl p-3 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      {charged.isPhone ? (
+                        <Phone className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      ) : (
+                        <UserCheck className="w-4 h-4 text-[#7F00FF] dark:text-purple-400 shrink-0" />
+                      )}
+                      <div>
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 block font-medium">
+                          {charged.isPhone ? 'الحساب المشحون (رقم هاتف):' : 'الحساب المشحون (معرف اللاعب / ID):'}
+                        </span>
+                        <span className="font-mono font-black text-xs sm:text-sm text-slate-900 dark:text-white dir-ltr text-right inline-block">
+                          {charged.value}
                         </span>
                       </div>
-                    )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(charged.value)}
+                      className="p-1 text-gray-400 hover:text-[#7F00FF] cursor-pointer"
+                      title="نسخ الحساب"
+                    >
+                      {copiedId === charged.value ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
                   </div>
+
+                  {/* 3. السعر */}
+                  {item.total && (
+                    <div className="flex justify-between items-center pt-2 border-t border-gray-100 dark:border-white/10 text-xs font-bold">
+                      <span className="text-gray-700 dark:text-gray-300">السعر:</span>
+                      <span className="font-mono text-sm text-[#7F00FF] dark:text-purple-400">
+                        {formatPriceSyp(typeof item.total === 'number' ? item.total : parseFloat(item.total) || 0, item.currency || 'USD')}
+                      </span>
+                    </div>
+                  )}
 
                   {/* Refresh this specific status */}
                   <div className="pt-2 flex items-center justify-end">

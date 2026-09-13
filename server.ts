@@ -579,56 +579,20 @@ const DEFAULT_DEPOSIT_METHODS = [
     feePercentage: 0,
     isActive: true,
     order: 1,
-  },
-  {
-    id: 'method_syriatel_cash',
-    name: 'سيريتل كاش (Syriatel Cash)',
-    currency: 'SYP',
-    exchangeRateToSyp: 1,
-    depositAddress: '0933 654 321',
-    minDeposit: 10000,
-    maxDeposit: 2000000,
-    details: '1. قم بالتحويل من محفظة سيريتل كاش أو عبر طلب الرمز #304* إلى الرقم أعلاه.\n2. بعد استلام رسالة التأكيد من سيريتل كاش، انسخ رقم العملية وضعه في الخانة المخصصة.\n3. سيتم مراجعة الطلب وإيداع الرصيد في حسابك خلال دقائق.',
-    icon: 'https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=128&auto=format&fit=crop&q=80',
-    feeEnabled: false,
-    feePercentage: 0,
-    isActive: true,
-    order: 2,
-  },
-  {
-    id: 'method_usdt_trc20',
-    name: 'USDT (TRC-20)',
-    currency: 'USDT',
-    exchangeRateToSyp: 15000,
-    depositAddress: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t7K9mX',
-    minDeposit: 5,
-    maxDeposit: 1000,
-    details: '1. أرسل عملة USDT حصراً عبر شبكة Tron (TRC-20) إلى عنوان المحفظة أعلاه.\n2. تحذير: لا ترسل أي عملة أخرى أو عبر شبكة مختلفة لتفادي ضياع الأموال.\n3. بعد تأكيد التحويل في محفظتك (Binance / TrustWallet / Bybit)، الصق رمز التجزئة أو رقم المعاملة (TXID).',
-    icon: 'https://cryptologos.cc/logos/tether-usdt-logo.png?v=035',
-    feeEnabled: true,
-    feePercentage: 1.5,
-    isActive: true,
-    order: 3,
-  },
-  {
-    id: 'method_alharam',
-    name: 'شركة الهرم للحوالات',
-    currency: 'SYP',
-    exchangeRateToSyp: 1,
-    depositAddress: 'دمشق - المستلم: متجر نيكسن لخدمات الشحن - هاتف: 0999 888 777',
-    minDeposit: 50000,
-    maxDeposit: 15000000,
-    details: '1. توجه إلى أي فرع من فروع شركة الهرم للحوالات.\n2. أرسل الحوالة بالاسم والرقم الموضح أعلاه.\n3. التقط صورة لإيصال الحوالة واحتفظ به، ثم أدخل رقم إشعار الحوالة المطبوع على الإيصال.',
-    icon: 'https://images.unsplash.com/photo-1580519542036-c47de6196ba5?w=128&auto=format&fit=crop&q=80',
-    feeEnabled: false,
-    feePercentage: 0,
-    isActive: true,
-    order: 4,
   }
 ];
 
 let inMemoryDepositMethods = [...DEFAULT_DEPOSIT_METHODS];
 let inMemoryDepositRequests: any[] = [];
+
+function isRemovedDepositMethod(method: any): boolean {
+  if (!method) return false;
+  const id = method.id || '';
+  const name = method.name || '';
+  if (id === 'method_syriatel_cash' || id === 'method_usdt_trc20' || id === 'method_alharam') return true;
+  if (name.includes('سيريتل كاش') || name.includes('USDT') || name.includes('الهرم')) return true;
+  return false;
+}
 
 function mapDbDepositRequest(row: any) {
   return {
@@ -663,23 +627,35 @@ app.get('/api/deposit-methods', async (_req: Request, res: Response) => {
   try {
     const pool = getDbPool();
     if (!pool) {
+      inMemoryDepositMethods = inMemoryDepositMethods.filter((m: any) => !isRemovedDepositMethod(m));
       return res.json({ success: true, methods: inMemoryDepositMethods });
     }
 
     const result = await pool.query('SELECT value FROM store_settings WHERE key = $1', ['deposit_methods']);
     if (result.rows.length === 0 || !result.rows[0].value) {
+      inMemoryDepositMethods = [...DEFAULT_DEPOSIT_METHODS];
       return res.json({ success: true, methods: inMemoryDepositMethods });
     }
 
-    const methods = result.rows[0].value;
-    if (Array.isArray(methods) && methods.length > 0) {
-      inMemoryDepositMethods = methods;
-      return res.json({ success: true, methods });
+    const rawMethods = result.rows[0].value;
+    if (Array.isArray(rawMethods) && rawMethods.length > 0) {
+      const filtered = rawMethods.filter((m: any) => !isRemovedDepositMethod(m));
+      // If any old methods were filtered out, persist the clean array to DB
+      if (filtered.length !== rawMethods.length) {
+        await pool.query(
+          `UPDATE store_settings SET value = $1, updated_at = NOW() WHERE key = 'deposit_methods'`,
+          [JSON.stringify(filtered.length > 0 ? filtered : DEFAULT_DEPOSIT_METHODS)]
+        );
+      }
+      inMemoryDepositMethods = filtered.length > 0 ? filtered : [...DEFAULT_DEPOSIT_METHODS];
+      return res.json({ success: true, methods: inMemoryDepositMethods });
     }
 
+    inMemoryDepositMethods = [...DEFAULT_DEPOSIT_METHODS];
     return res.json({ success: true, methods: inMemoryDepositMethods });
   } catch (err: any) {
     console.error('Error in GET /api/deposit-methods:', err);
+    inMemoryDepositMethods = inMemoryDepositMethods.filter((m: any) => !isRemovedDepositMethod(m));
     return res.json({ success: true, methods: inMemoryDepositMethods });
   }
 });
@@ -792,7 +768,11 @@ app.get('/api/deposit-requests', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('Error in GET /api/deposit-requests:', err);
-    return res.status(500).json({ error: err.message });
+    let filtered = [...inMemoryDepositRequests];
+    const { userId, status } = req.query;
+    if (userId) filtered = filtered.filter((r) => r.userId === userId);
+    if (status) filtered = filtered.filter((r) => r.status === status);
+    return res.json({ success: true, requests: filtered });
   }
 });
 
@@ -2378,9 +2358,20 @@ setInterval(async () => {
   }
 }, 25000);
 
+function generateUniqueOrderId(): string {
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const rand = Math.floor(10000 + Math.random() * 90000);
+  return `NX-${yy}${mm}${dd}-${rand}`;
+}
+
 // 3. Create New Order / Top-up
 // Supports both game/app products & cash transfer
 app.post('/api/sc/orders', async (req: Request, res: Response) => {
+  const uniqueOperationOrderId = generateUniqueOrderId();
+
   const {
     productId,
     qty,
@@ -2496,7 +2487,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       const fallbackName = customerName || 'عميل المتجر';
       const insertFallback = await pool.query(
         `INSERT INTO users (id, name, email, balance, currency, role, created_at, updated_at)
-         VALUES ($1, $2, $3, 100.00, 'USD', 'customer', NOW(), NOW())
+         VALUES ($1, $2, $3, 0.00, 'USD', 'customer', NOW(), NOW())
          ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
          RETURNING id, name, email, balance, currency, role;`,
         [fallbackId, fallbackName, fallbackEmail]
@@ -2689,7 +2680,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       }
 
       // Record the failed order in orders table with status 'failed' ("غير مكتملة")
-      const failedOrderId = `ORD-FAIL-${Date.now()}`;
+      const failedOrderId = uniqueOperationOrderId;
       try {
         await pool.query(
           `INSERT INTO orders (
@@ -2749,8 +2740,8 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       });
     }
 
-    // 10. SC Store succeeded -> persist order in DB with initial status
-    const scOrderId = String(scData.order?.orderId || scData.orderId || scData.id || `SC-${Date.now()}`).trim();
+    // 10. SC Store succeeded -> persist order in DB with unique order ID & supplier order ID
+    const scOrderId = String(scData.order?.orderId || scData.orderId || scData.id || '').trim();
     const scStatus = String(scData.order?.status || scData.status || 'processing').toLowerCase();
 
     await pool.query(
@@ -2764,9 +2755,9 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
         raw_response = EXCLUDED.raw_response,
         updated_at = NOW();`,
       [
-        scOrderId,
-        scOrderId,
-        scOrderId,
+        uniqueOperationOrderId,
+        uniqueOperationOrderId,
+        scOrderId || uniqueOperationOrderId,
         dbUser.id,
         String(productId || cashType || ''),
         prodName || scData.order?.product || 'منتج رقمي',
@@ -2786,9 +2777,11 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
     return res.json({
       error: false,
       success: true,
-      orderId: scOrderId,
+      orderId: uniqueOperationOrderId,
+      scOrderId: scOrderId || uniqueOperationOrderId,
       order: {
-        orderId: scOrderId,
+        orderId: uniqueOperationOrderId,
+        scOrderId: scOrderId || uniqueOperationOrderId,
         status: scStatus,
         product: prodName || scData.order?.product,
         category: prodCategory || scData.order?.category,
@@ -2829,21 +2822,57 @@ app.get('/api/sc/orders/:orderId', async (req: Request, res: Response) => {
   }
 
   try {
-    // If orderId is in database, run syncAndRefundProcessingOrders for it
     const pool = getDbPool();
+    let scQueryId = orderId;
+    let localDbOrder: any = null;
+
     if (pool) {
-      await syncAndRefundProcessingOrders([orderId]);
+      // Find matching order in DB
+      const dbMatch = await pool.query(
+        'SELECT * FROM orders WHERE order_id = $1 OR sc_order_id = $1 OR id = $1 LIMIT 1',
+        [orderId]
+      );
+      if (dbMatch.rows.length > 0) {
+        localDbOrder = dbMatch.rows[0];
+        if (localDbOrder.sc_order_id && localDbOrder.sc_order_id !== orderId) {
+          scQueryId = localDbOrder.sc_order_id;
+        }
+      }
+      await syncAndRefundProcessingOrders([orderId, scQueryId]);
     }
 
     const authHeaders = await getAuthHeaders(req);
-    const response = await fetch(`${SC_STORE_BASE_URL}/orders/${encodeURIComponent(orderId)}`, {
+    const response = await fetch(`${SC_STORE_BASE_URL}/orders/${encodeURIComponent(scQueryId)}`, {
       method: 'GET',
       headers: authHeaders,
     });
 
     const data = await response.json().catch(() => null);
     if (!response.ok) {
+      if (localDbOrder) {
+        return res.json({
+          order: {
+            orderId: localDbOrder.order_id,
+            productId: localDbOrder.product_id,
+            product: localDbOrder.product_name,
+            total: parseFloat(localDbOrder.total || '0'),
+            currency: localDbOrder.currency,
+            status: localDbOrder.status,
+            dynamicFields: localDbOrder.dynamic_fields,
+            notes: localDbOrder.notes,
+            createdAt: localDbOrder.created_at,
+          },
+        });
+      }
       return res.status(response.status).json(data || { error: 'Failed to fetch order status', status: response.status });
+    }
+
+    // If successful response from supplier, ensure orderId returned is our orderId if available
+    if (data && localDbOrder) {
+      if (data.order && typeof data.order === 'object') {
+        data.order.uniqueOrderId = localDbOrder.order_id;
+        data.order.dynamicFields = localDbOrder.dynamic_fields || data.order.dynamicFields;
+      }
     }
 
     return res.json(data);

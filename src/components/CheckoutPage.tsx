@@ -15,6 +15,7 @@ import {
   Sparkles,
   Info,
   Clock,
+  UserCheck,
 } from 'lucide-react';
 import { Product, CustomerUser, OrderItem, OrderOptions } from '../types';
 import { createNewOrder } from '../services/scStoreApi';
@@ -24,6 +25,7 @@ import { convertToSyp, formatSypNumber } from '../utils/currencyUtils';
 import { useProfitMargin } from '../utils/profitUtils';
 import { normalizeSyrianPhoneNumber, detectSyrianNetwork } from '../utils/searchUtils';
 import { isUserAdmin } from '../utils/adminUtils';
+import { extractChargedAccount } from '../utils/orderUtils';
 
 interface CheckoutPageProps {
   product: Product;
@@ -304,43 +306,64 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
           </div>
 
           {/* Receipt Details Card */}
-          <div className="bg-slate-50 dark:bg-black/40 rounded-2xl p-5 sm:p-6 border border-slate-200/80 dark:border-white/10 text-right space-y-3.5 text-xs sm:text-sm max-w-lg mx-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">رقم الطلب (Order ID):</span>
-              <div className="flex items-center gap-2">
-                <span className="font-mono font-bold text-slate-900 dark:text-white">
-                  #{successOrder.orderId}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleCopyOrderId(successOrder.orderId)}
-                  className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors cursor-pointer"
-                  title="نسخ رقم الطلب"
-                >
-                  {copiedId ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
-                </button>
+          {(() => {
+            const charged = extractChargedAccount(successOrder.dynamicFields);
+            return (
+              <div className="bg-slate-50 dark:bg-black/40 rounded-2xl p-5 sm:p-6 border border-slate-200/80 dark:border-white/10 text-right space-y-3.5 text-xs sm:text-sm max-w-lg mx-auto">
+                {/* 1. اسم المنتج المشحون */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">اسم المنتج المشحون:</span>
+                  <span className="font-extrabold text-slate-900 dark:text-white">{successOrder.productName}</span>
+                </div>
+
+                {/* 2. رقم الطلب الفريد */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">رقم الطلب الفريد:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-[#7F00FF] dark:text-purple-300">
+                      #{successOrder.orderId}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyOrderId(successOrder.orderId)}
+                      className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors cursor-pointer"
+                      title="نسخ رقم الطلب الفريد"
+                    >
+                      {copiedId ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. السعر */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">السعر (المبلغ الإجمالي):</span>
+                  <span className="font-mono font-black text-base text-[#7F00FF] dark:text-purple-400">
+                    {formatPriceSyp(successOrder.total, successOrder.currency)}
+                  </span>
+                </div>
+
+                {/* 4. الحساب المشحون رقم هاتف او id */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1.5">
+                    {charged.isPhone ? <Phone className="w-3.5 h-3.5 text-emerald-600" /> : <UserCheck className="w-3.5 h-3.5 text-[#7F00FF]" />}
+                    <span>{charged.isPhone ? 'الحساب المشحون (رقم هاتف):' : 'الحساب المشحون (معرف اللاعب / ID):'}</span>
+                  </span>
+                  <span className="font-mono font-bold text-slate-900 dark:text-white dir-ltr">
+                    {charged.value}
+                  </span>
+                </div>
+
+                {/* 5. حالة الطلب */}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">حالة الطلب:</span>
+                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>قيد المعالجة والتنفيذ الآلي</span>
+                  </span>
+                </div>
               </div>
-            </div>
-
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">المنتج / الباقة:</span>
-              <span className="font-bold text-slate-900 dark:text-white">{successOrder.productName}</span>
-            </div>
-
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">بيانات الشحن المدخلة:</span>
-              <span className="font-mono font-bold text-slate-900 dark:text-white dir-ltr">
-                {Object.values(successOrder.dynamicFields)[0] || '-'}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">المبلغ الإجمالي المدفوع:</span>
-              <span className="font-mono font-black text-base text-[#7F00FF] dark:text-purple-400">
-                {formatPriceSyp(successOrder.total, successOrder.currency)}
-              </span>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4 max-w-lg mx-auto">

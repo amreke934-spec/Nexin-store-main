@@ -19,7 +19,7 @@ import { SidebarDrawer } from './components/SidebarDrawer';
 import { AboutPage } from './components/AboutPage';
 import { BannerManagementModal } from './components/BannerManagementModal';
 import { FloatingSupportWidget } from './components/FloatingSupportWidget';
-import { DepositModal } from './components/DepositModal';
+import { DepositPage } from './components/DepositPage';
 import { PullToRefresh } from './components/PullToRefresh';
 import { MaintenanceScreen } from './components/MaintenanceScreen';
 import { MaintenanceSettings } from './types';
@@ -36,15 +36,12 @@ export default function App() {
   const [banners, setBanners] = useState<StoreBanner[]>(() => getSavedBanners());
   const [isBannerModalOpen, setIsBannerModalOpen] = useState<boolean>(false);
 
-  // User Deposit Modal State
-  const [isDepositModalOpen, setIsDepositModalOpen] = useState<boolean>(false);
-
   // Maintenance Mode state
   const [maintenanceSettings, setMaintenanceSettings] = useState<MaintenanceSettings>(DEFAULT_MAINTENANCE_SETTINGS);
   const [adminInitialTab, setAdminInitialTab] = useState<'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance'>('stats');
 
-  // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track' | 'about' | 'checkout'
-  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track' | 'about' | 'checkout'>('products');
+  // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track' | 'about' | 'checkout' | 'deposit'
+  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track' | 'about' | 'checkout' | 'deposit'>('products');
   const [trackingOrderId, setTrackingOrderId] = useState<string>('');
 
   // Theme state (Dark / Light Mode) initialized from storage or system preference
@@ -461,16 +458,24 @@ export default function App() {
   const handleOpenSidebar = useCallback(() => setIsSidebarOpen(true), []);
   const handleCloseSidebar = useCallback(() => setIsSidebarOpen(false), []);
 
-  // Deposit modal helpers
-  const handleOpenDeposit = useCallback(() => {
+  // Deposit navigation helpers
+  const handleNavigateDeposit = useCallback(() => {
+    if (!currentUser) {
+      handleOpenAuth('login');
+      return;
+    }
     if (isLockedForCurrentUser) {
       alert('الموقع في وضع الصيانة حالياً - عمليات الإيداع متوقفة مؤقتاً.');
       return;
     }
-    setIsDepositModalOpen(true);
-  }, [isLockedForCurrentUser]);
+    setActiveTab('deposit');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [currentUser, isLockedForCurrentUser, handleOpenAuth]);
 
-  const handleCloseDeposit = useCallback(() => setIsDepositModalOpen(false), []);
+  const handleOpenDeposit = useCallback(() => {
+    handleNavigateDeposit();
+  }, [handleNavigateDeposit]);
+
   const handleDepositSuccess = useCallback(async () => {
     if (currentUser) {
       try {
@@ -630,6 +635,27 @@ export default function App() {
               initialMode={authMode}
               theme={theme}
             />
+          ) : activeTab === 'deposit' ? (
+            isLockedForCurrentUser ? (
+              <MaintenanceScreen
+                settings={maintenanceSettings}
+                currentUser={currentUser}
+              />
+            ) : (
+              <DepositPage
+                currentUser={currentUser}
+                onNavigateHome={handleNavigateHome}
+                onOpenAuth={handleOpenAuth}
+                onDepositSuccess={handleDepositSuccess}
+                onRefreshUser={() => {
+                  if (currentUser?.email || currentUser?.id) {
+                    fetchUserProfile(currentUser.email || currentUser.id).then((updated) => {
+                      if (updated) setCurrentUser(updated);
+                    });
+                  }
+                }}
+              />
+            )
           ) : activeTab === 'checkout' && selectedProductForOrder && !isLockedForCurrentUser ? (
             <CheckoutPage
               product={selectedProductForOrder}
@@ -650,12 +676,13 @@ export default function App() {
         </main>
       </PullToRefresh>
 
-      {/* Bottom Floating Navigation Bar (Clean 3-item layout: Home, Orders, Account) */}
+      {/* Bottom Floating Navigation Bar (4-item layout: Home, Orders, Deposit, Account) */}
       <BottomNav
         activeTab={activeTab}
         authMode={authMode}
         onNavigateHome={handleNavigateHome}
         onNavigateOrders={handleNavigateOrders}
+        onNavigateDeposit={handleNavigateDeposit}
         onNavigateLogin={() => handleOpenAuth('login')}
         onNavigateRegister={() => handleOpenAuth('register')}
         onNavigateTrack={handleNavigateOrders}
@@ -672,16 +699,6 @@ export default function App() {
         banners={banners}
         onSaveBanners={handleSaveBanners}
       />
-
-      {/* User Deposit Modal */}
-      {currentUser && (
-        <DepositModal
-          isOpen={isDepositModalOpen}
-          onClose={handleCloseDeposit}
-          currentUser={currentUser}
-          onSuccess={handleDepositSuccess}
-        />
-      )}
 
       {/* Floating 3-Dots Support & Social Media Action Widget */}
       {!isSplashScreenVisible && <FloatingSupportWidget />}

@@ -33,8 +33,11 @@ import {
   Mail,
   BadgeCheck,
   Wrench,
+  Phone,
+  UserCheck,
 } from 'lucide-react';
 import { CustomerUser, MerchantInfo, OrderItem, MaintenanceSettings } from '../types';
+import { extractChargedAccount } from '../utils/orderUtils';
 import {
   fetchAdminStats,
   fetchAdminUsers,
@@ -931,68 +934,87 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                 <table className="w-full text-right text-xs">
                   <thead>
                     <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 font-bold">
-                      <th className="pb-3 pr-2">رقم الطلب</th>
-                      <th className="pb-3">المنتج</th>
+                      <th className="pb-3 pr-2">رقم الطلب الفريد</th>
+                      <th className="pb-3">اسم المنتج المشحون</th>
+                      <th className="pb-3">الحساب المشحون (هاتف / ID)</th>
                       <th className="pb-3">المستخدم / العميل</th>
                       <th className="pb-3">السعر</th>
-                      <th className="pb-3">الحالة</th>
+                      <th className="pb-3">حالة الطلب</th>
                       <th className="pb-3">التاريخ</th>
                       <th className="pb-3 pl-2 text-left">إجراء</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
-                    {stats.recentOrders.map((order) => (
-                      <tr key={order.orderId} className="hover:bg-slate-50/60 dark:hover:bg-slate-900/40 transition-colors">
-                        <td className="py-3 pr-2 font-mono font-bold text-purple-700 dark:text-purple-300">
-                          #{order.orderId}
-                        </td>
-                        <td className="py-3 font-bold text-slate-800 dark:text-slate-100">
-                          {order.productName}
-                        </td>
-                        <td className="py-3 text-slate-600 dark:text-slate-400">
-                          {order.customerName || order.customerEmail || 'عميل مسجل'}
-                        </td>
-                        <td className="py-3 font-mono font-bold text-slate-900 dark:text-white">
-                          {formatPriceSyp(order.total, 'USD')}
-                        </td>
-                        <td className="py-3">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                              order.status === 'completed'
-                                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                    {stats.recentOrders.map((order) => {
+                      const charged = extractChargedAccount(order.dynamicFields, order.customerEmail || order.notes);
+                      return (
+                        <tr key={order.orderId} className="hover:bg-slate-50/60 dark:hover:bg-slate-900/40 transition-colors">
+                          <td className="py-3 pr-2 font-mono font-bold text-purple-700 dark:text-purple-300">
+                            #{order.orderId}
+                          </td>
+                          <td className="py-3 font-bold text-slate-800 dark:text-slate-100">
+                            {order.productName}
+                          </td>
+                          <td className="py-3">
+                            <div className="flex items-center gap-1 font-mono text-[11px] font-bold">
+                              {charged.isPhone ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50">
+                                  <Phone className="w-3 h-3 text-emerald-600" />
+                                  <span dir="ltr">{charged.value}</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50">
+                                  <UserCheck className="w-3 h-3 text-purple-600" />
+                                  <span dir="ltr">{charged.value}</span>
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 text-slate-600 dark:text-slate-400">
+                            {order.customerName || order.customerEmail || 'عميل مسجل'}
+                          </td>
+                          <td className="py-3 font-mono font-bold text-slate-900 dark:text-white">
+                            {formatPriceSyp(order.total, 'USD')}
+                          </td>
+                          <td className="py-3">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                order.status === 'completed'
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                  : order.status === 'failed'
+                                  ? 'bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-300 border border-red-200 dark:border-red-800'
+                                  : 'bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                              }`}
+                            >
+                              {order.status === 'completed'
+                                ? 'مكتمل'
                                 : order.status === 'failed'
-                                ? 'bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-300 border border-red-200 dark:border-red-800'
-                                : 'bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                            }`}
-                          >
-                            {order.status === 'completed'
-                              ? 'مكتمل'
-                              : order.status === 'failed'
-                              ? 'ملغي / فشل'
-                              : 'قيد المعالجة'}
-                          </span>
-                        </td>
-                        <td className="py-3 text-slate-400 text-[11px]">
-                          {order.createdAt ? new Date(order.createdAt).toLocaleDateString('ar-EG') : 'الآن'}
-                        </td>
-                        <td className="py-3 pl-2 text-left">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOrderCheckIdInput(order.orderId);
-                              setActiveAdminTab('order_check');
-                              setTimeout(() => {
-                                handleCheckOrder();
-                              }, 100);
-                            }}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-[#7F00FF] hover:bg-purple-50 dark:hover:bg-purple-950/50 transition-colors cursor-pointer"
-                            title="فحص تفاصيل الطلب"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                                ? 'غير مكتملة / فشل'
+                                : 'قيد المعالجة'}
+                            </span>
+                          </td>
+                          <td className="py-3 text-slate-400 text-[11px]">
+                            {order.createdAt ? new Date(order.createdAt).toLocaleDateString('ar-EG') : 'الآن'}
+                          </td>
+                          <td className="py-3 pl-2 text-left">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOrderCheckIdInput(order.orderId);
+                                setActiveAdminTab('order_check');
+                                setTimeout(() => {
+                                  handleCheckOrder();
+                                }, 100);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-[#7F00FF] hover:bg-purple-50 dark:hover:bg-purple-950/50 transition-colors cursor-pointer"
+                              title="فحص تفاصيل الطلب"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1684,45 +1706,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                   </span>
                 </div>
 
-                {/* Details Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700">
-                    <span className="text-slate-400 block font-medium">اسم المنتج</span>
-                    <span className="font-bold text-slate-900 dark:text-white text-sm block mt-0.5">
-                      {orderCheckResult.dbOrder?.productName || orderCheckResult.scData?.productName || 'منتج رقمي'}
-                    </span>
-                  </div>
+                {/* 5 Core Order Fields Highlight */}
+                {(() => {
+                  const charged = extractChargedAccount(
+                    orderCheckResult.dbOrder?.dynamicFields || orderCheckResult.scData?.data,
+                    orderCheckResult.dbOrder?.customerEmail
+                  );
+                  return (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                        {/* 1. اسم المنتج المشحون */}
+                        <div className="p-3 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700">
+                          <span className="text-slate-400 block font-medium">اسم المنتج المشحون</span>
+                          <span className="font-bold text-slate-900 dark:text-white text-sm block mt-0.5">
+                            {orderCheckResult.dbOrder?.productName || orderCheckResult.scData?.productName || 'منتج رقمي'}
+                          </span>
+                        </div>
 
-                  <div className="p-3 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700">
-                    <span className="text-slate-400 block font-medium">المبلغ الإجمالي</span>
-                    <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400 text-sm block mt-0.5">
-                      {formatPriceSyp(typeof (orderCheckResult.dbOrder?.total ?? orderCheckResult.scData?.price) === 'number' ? (orderCheckResult.dbOrder?.total ?? orderCheckResult.scData?.price) : parseFloat(orderCheckResult.dbOrder?.total ?? orderCheckResult.scData?.price) || 0, 'USD')}
-                    </span>
-                  </div>
+                        {/* 2. رقم الطلب الفريد */}
+                        <div className="p-3 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700">
+                          <span className="text-slate-400 block font-medium">رقم الطلب الفريد</span>
+                          <span className="font-mono font-bold text-purple-700 dark:text-purple-300 text-sm block mt-0.5">
+                            #{orderCheckResult.orderId}
+                          </span>
+                        </div>
 
-                  <div className="p-3 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700">
-                    <span className="text-slate-400 block font-medium">المستخدم / العميل</span>
-                    <span className="font-bold text-slate-900 dark:text-white block mt-0.5 truncate">
-                      {orderCheckResult.dbOrder?.customerName || orderCheckResult.dbOrder?.customerEmail || 'عميل مسجل'}
-                    </span>
-                  </div>
-                </div>
+                        {/* 3. السعر */}
+                        <div className="p-3 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700">
+                          <span className="text-slate-400 block font-medium">السعر (الإجمالي)</span>
+                          <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400 text-sm block mt-0.5">
+                            {formatPriceSyp(typeof (orderCheckResult.dbOrder?.total ?? orderCheckResult.scData?.price) === 'number' ? (orderCheckResult.dbOrder?.total ?? orderCheckResult.scData?.price) : parseFloat(orderCheckResult.dbOrder?.total ?? orderCheckResult.scData?.price) || 0, 'USD')}
+                          </span>
+                        </div>
 
-                {/* Dynamic Fields (Player ID / Phone) */}
-                {orderCheckResult.dbOrder?.dynamicFields && Object.keys(orderCheckResult.dbOrder.dynamicFields).length > 0 && (
-                  <div className="p-3 bg-purple-50 dark:bg-purple-950/30 rounded-xl border border-purple-100 dark:border-purple-900/50 text-xs">
-                    <span className="font-bold text-purple-900 dark:text-purple-300 block mb-1">
-                      البيانات المدخلة للطلب (معرف اللاعب / الرقم):
-                    </span>
-                    <div className="flex items-center gap-3 flex-wrap font-mono">
-                      {Object.entries(orderCheckResult.dbOrder.dynamicFields).map(([k, v]) => (
-                        <span key={k} className="px-2 py-0.5 bg-white dark:bg-slate-900 rounded-md font-bold text-slate-800 dark:text-slate-200 border border-purple-200 dark:border-purple-800">
-                          {k}: {String(v)}
-                        </span>
-                      ))}
+                        {/* 4. الحساب المشحون */}
+                        <div className="p-3 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700">
+                          <span className="text-slate-400 block font-medium">
+                            {charged.isPhone ? 'الحساب المشحون (هاتف)' : 'الحساب المشحون (ID)'}
+                          </span>
+                          <span className="font-mono font-bold text-slate-900 dark:text-white text-sm block mt-0.5 dir-ltr text-right">
+                            {charged.value}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Dynamic Fields Details if present */}
+                      {orderCheckResult.dbOrder?.dynamicFields && Object.keys(orderCheckResult.dbOrder.dynamicFields).length > 0 && (
+                        <div className="p-3 bg-purple-50 dark:bg-purple-950/30 rounded-xl border border-purple-100 dark:border-purple-900/50 text-xs">
+                          <span className="font-bold text-purple-900 dark:text-purple-300 block mb-1">
+                            البيانات المدخلة للطلب (الحساب المشحون / معرف اللاعب):
+                          </span>
+                          <div className="flex items-center gap-3 flex-wrap font-mono">
+                            {Object.entries(orderCheckResult.dbOrder.dynamicFields).map(([k, v]) => (
+                              <span key={k} className="px-2 py-0.5 bg-white dark:bg-slate-900 rounded-md font-bold text-slate-800 dark:text-slate-200 border border-purple-200 dark:border-purple-800">
+                                {k}: {String(v)}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* SC Store Raw Response JSON Viewer */}
                 {orderCheckResult.scData && (

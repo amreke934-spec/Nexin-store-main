@@ -370,8 +370,7 @@ export async function checkAdminOrderDetails(orderId: string): Promise<AdminOrde
     const res = await fetch(`/api/admin/order-check/${encodeURIComponent(orderId)}`);
     if (!res.ok) return null;
     return await res.json();
-  } catch (err) {
-    console.error('Failed to inspect order:', err);
+  } catch {
     return null;
   }
 }
@@ -426,18 +425,65 @@ export async function syncProcessingOrdersInDb(options?: {
 // ==========================================
 
 /**
- * Fetch all available deposit methods
+ * Default fallback methods if network is temporarily unreachable
+ */
+const DEFAULT_FALLBACK_DEPOSIT_METHODS: DepositMethod[] = [
+  {
+    id: 'method_sham_cash',
+    name: 'Sham Cash SYP شام كاش سوري',
+    currency: 'SYP',
+    exchangeRateToSyp: 1,
+    depositAddress: '31494aa660809ce08459d1639019ba2d',
+    minDeposit: 1000,
+    maxDeposit: 5000000,
+    details: '1. افتح تطبيق شام كاش على هاتفك.\n2. قم بتحويل المبلغ المطلوب الى الحساب المذكور\n3. بعد نجاح التحويل، أدخل رقم إشعار العملية لتأكيد وشحن رصيدك فوراً.\n\nإسم الحساب: أحمد دياب جعفر',
+    icon: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRLf-AWLcNAj29nDaqZA2ROkwv4JHOXwNQi-3bGylRKcg&s=10',
+    feeEnabled: false,
+    feePercentage: 0,
+    isActive: true,
+    order: 1,
+  }
+];
+
+/**
+ * Fetch all available deposit methods with silent retry and localStorage cache fallback
  */
 export async function fetchDepositMethods(): Promise<DepositMethod[]> {
-  try {
-    const res = await fetch('/api/deposit-methods');
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.methods || [];
-  } catch (err) {
-    console.error('Failed to fetch deposit methods:', err);
-    return [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch('/api/deposit-methods');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.methods) && data.methods.length > 0) {
+          try {
+            localStorage.setItem('nx_cached_deposit_methods', JSON.stringify(data.methods));
+          } catch {
+            // ignore storage quota
+          }
+          return data.methods;
+        }
+      }
+    } catch {
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        continue;
+      }
+    }
   }
+
+  try {
+    const cached = localStorage.getItem('nx_cached_deposit_methods');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  return DEFAULT_FALLBACK_DEPOSIT_METHODS;
 }
 
 /**
@@ -493,20 +539,28 @@ export async function deleteDepositMethod(id: string): Promise<{ success: boolea
  * Fetch deposit requests (all for admin, or for a specific user)
  */
 export async function fetchDepositRequests(userId?: string, status?: string): Promise<DepositRequest[]> {
-  try {
-    const params = new URLSearchParams();
-    if (userId) params.append('userId', userId);
-    if (status) params.append('status', status);
+  const params = new URLSearchParams();
+  if (userId) params.append('userId', userId);
+  if (status) params.append('status', status);
 
-    const url = `/api/deposit-requests${params.toString() ? `?${params.toString()}` : ''}`;
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.requests || [];
-  } catch (err) {
-    console.error('Failed to fetch deposit requests:', err);
-    return [];
+  const url = `/api/deposit-requests${params.toString() ? `?${params.toString()}` : ''}`;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        return Array.isArray(data.requests) ? data.requests : [];
+      }
+    } catch {
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        continue;
+      }
+    }
   }
+
+  return [];
 }
 
 /**

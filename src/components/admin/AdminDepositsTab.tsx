@@ -116,9 +116,11 @@ export const AdminDepositsTab: React.FC<AdminDepositsTabProps> = ({
     setIsLoadingRequests(true);
     try {
       const data = await fetchDepositRequests();
-      setRequests(data);
-    } catch (err) {
-      console.error('Error fetching deposit requests:', err);
+      if (Array.isArray(data)) {
+        setRequests(data);
+      }
+    } catch {
+      // Handled gracefully
     } finally {
       setIsLoadingRequests(false);
     }
@@ -128,9 +130,11 @@ export const AdminDepositsTab: React.FC<AdminDepositsTabProps> = ({
     setIsLoadingMethods(true);
     try {
       const data = await fetchDepositMethods();
-      setMethods(data);
-    } catch (err) {
-      console.error('Error fetching deposit methods:', err);
+      if (Array.isArray(data)) {
+        setMethods(data);
+      }
+    } catch {
+      // Handled gracefully
     } finally {
       setIsLoadingMethods(false);
     }
@@ -989,7 +993,7 @@ export const AdminDepositsTab: React.FC<AdminDepositsTabProps> = ({
                       formData: { ...prev.formData, name: e.target.value },
                     }))
                   }
-                  placeholder="مثال: شام كاش، سيريتل كاش، USDT (TRC-20)، شركة الهرم..."
+                  placeholder="مثال: شام كاش، أو أي طريقة دفع أخرى..."
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-bold outline-none focus:ring-2 focus:ring-[#7F00FF]"
                 />
               </div>
@@ -1060,7 +1064,7 @@ export const AdminDepositsTab: React.FC<AdminDepositsTabProps> = ({
                       formData: { ...prev.formData, depositAddress: e.target.value },
                     }))
                   }
-                  placeholder="مثال: 0988123456 أو عنوان محفظة TRC-20 أو اسم المستلم في شركة الهرم"
+                  placeholder="مثال: 0988123456 أو رقم الحساب / المحفظة أو اسم وبيانات المستلم"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-xs font-bold outline-none focus:ring-2 focus:ring-[#7F00FF]"
                 />
               </div>

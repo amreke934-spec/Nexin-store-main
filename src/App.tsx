@@ -215,8 +215,31 @@ export default function App() {
 
     fetchStoreSetting<StoreBanner[]>('store_banners').then((savedBanners) => {
       if (savedBanners && Array.isArray(savedBanners) && savedBanners.length > 0) {
-        setBanners(savedBanners);
-        saveBannersLocally(savedBanners);
+        const normalized = savedBanners.map((b) => {
+          const isTg =
+            b.id === 'banner-telegram' ||
+            b.title?.includes('تيليجرام') ||
+            b.title?.includes('تليجرام') ||
+            b.title?.toLowerCase().includes('telegram') ||
+            b.subtitle?.includes('قناتنا') ||
+            b.badgeText?.includes('تيليجرام') ||
+            b.badgeText?.includes('تليجرام') ||
+            b.badgeText?.toLowerCase().includes('telegram') ||
+            (b.linkUrl && b.linkUrl.toLowerCase().includes('t.me')) ||
+            (b.linkUrl && b.linkUrl.toLowerCase().includes('telegram'));
+
+          if (isTg) {
+            return {
+              ...b,
+              linkUrl: 'https://t.me/Nexin_Store',
+              actionType: 'url' as const,
+              badgeText: b.badgeText || 'انضم لقناة التيليجرام ✈️',
+            };
+          }
+          return b;
+        });
+        setBanners(normalized);
+        saveBannersLocally(normalized);
       }
     }).catch(() => {});
 

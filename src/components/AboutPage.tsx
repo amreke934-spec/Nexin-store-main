@@ -182,7 +182,7 @@ export const AboutPage: React.FC<AboutPageProps> = React.memo(({ onNavigateHome 
             واتساب مباشر
           </a>
           <a
-            href="https://t.me/nexen_store"
+            href="https://t.me/Nexin_Store"
             target="_blank"
             rel="noopener noreferrer"
             className="py-2.5 px-4 rounded-xl bg-[#7F00FF] hover:bg-[#6b00d6] active:scale-95 text-white text-xs sm:text-sm font-bold transition-all shadow-md shadow-[#7F00FF]/30 shrink-0"

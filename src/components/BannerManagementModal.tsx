@@ -341,7 +341,7 @@ export const BannerManagementModal: React.FC<BannerManagementModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="مثال: https://t.me/nexen_store"
+                  placeholder="مثال: https://t.me/Nexin_Store"
                   value={linkUrl}
                   dir="ltr"
                   onChange={(e) => setLinkUrl(e.target.value)}

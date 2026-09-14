@@ -99,9 +99,32 @@ export const BannerSlider: React.FC<BannerSliderProps> = React.memo(({
 
   const currentBanner = activeBanners[currentIndex];
 
+  const isTelegramBanner = (banner: StoreBanner): boolean => {
+    return (
+      banner.id === 'banner-telegram' ||
+      Boolean(banner.title?.toLowerCase().includes('telegram')) ||
+      Boolean(banner.title?.includes('تيليجرام')) ||
+      Boolean(banner.title?.includes('تليجرام')) ||
+      Boolean(banner.subtitle?.includes('قناتنا')) ||
+      Boolean(banner.badgeText?.toLowerCase().includes('telegram')) ||
+      Boolean(banner.badgeText?.includes('تيليجرام')) ||
+      Boolean(banner.badgeText?.includes('تليجرام')) ||
+      Boolean(banner.linkUrl && banner.linkUrl.toLowerCase().includes('t.me')) ||
+      Boolean(banner.linkUrl && banner.linkUrl.toLowerCase().includes('telegram'))
+    );
+  };
+
+  const getResolvedBannerLink = (banner: StoreBanner): string => {
+    if (isTelegramBanner(banner)) {
+      return 'https://t.me/Nexin_Store';
+    }
+    return banner.linkUrl || '';
+  };
+
   const handleBannerClick = (banner: StoreBanner) => {
-    if (banner.linkUrl) {
-      window.open(banner.linkUrl, '_blank', 'noopener,noreferrer');
+    const link = getResolvedBannerLink(banner);
+    if (link) {
+      window.open(link, '_blank', 'noopener,noreferrer');
     } else if (banner.actionType === 'category' && banner.targetCategory && onSelectCategory) {
       onSelectCategory(banner.targetCategory);
     }
@@ -124,7 +147,9 @@ export const BannerSlider: React.FC<BannerSliderProps> = React.memo(({
         {/* Banner Images Slides */}
         {activeBanners.map((banner, index) => {
           const isCurrent = index === currentIndex;
-          const hasAction = !!banner.linkUrl || (banner.actionType === 'category' && !!banner.targetCategory);
+          const isTg = isTelegramBanner(banner);
+          const resolvedLink = getResolvedBannerLink(banner);
+          const hasAction = !!resolvedLink || (banner.actionType === 'category' && !!banner.targetCategory);
 
           return (
             <div
@@ -148,15 +173,17 @@ export const BannerSlider: React.FC<BannerSliderProps> = React.memo(({
               {/* Floating Action Indicator Pill if banner is interactive */}
               {hasAction && isCurrent && (
                 <div className="absolute bottom-3 left-3 sm:bottom-4 sm:left-4 z-20 pointer-events-auto">
-                  {banner.linkUrl ? (
+                  {resolvedLink ? (
                     <a
-                      href={banner.linkUrl}
+                      href={resolvedLink}
                       target="_blank"
                       rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
                       className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-black/70 hover:bg-[#7F00FF] backdrop-blur-md text-white text-[11px] sm:text-xs font-black border border-white/25 shadow-lg hover:border-purple-300 hover:scale-105 active:scale-95 transition-all duration-200"
                     >
-                      <span>{banner.badgeText || 'انقر للمزيد'}</span>
+                      <span>{banner.badgeText || (isTg ? 'انضم لقناة التيليجرام ✈️' : 'انقر للمزيد')}</span>
                       <ExternalLink className="w-3.5 h-3.5 text-purple-300" />
                     </a>
                   ) : (

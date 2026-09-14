@@ -18,7 +18,7 @@ export const FloatingSupportWidget: React.FC<FloatingSupportWidgetProps> = React
 
   const whatsappUrl = 'https://wa.me/963933829164';
   const telegramSupportUrl = 'https://t.me/+963933829164';
-  const telegramChannelUrl = 'https://t.me/nexen_store';
+  const telegramChannelUrl = 'https://t.me/Nexin_Store';
 
   // Close on outside click
   useEffect(() => {
@@ -177,7 +177,7 @@ export const FloatingSupportWidget: React.FC<FloatingSupportWidgetProps> = React
                       <Sparkles className="w-3.5 h-3.5 text-[#7F00FF]" />
                     </div>
                     <span className="text-xs text-purple-600 dark:text-purple-300 font-mono font-medium block mt-0.5">
-                      t.me/nexen_store
+                      t.me/Nexin_Store
                     </span>
                   </div>
                 </div>

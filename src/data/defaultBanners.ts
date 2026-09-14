@@ -317,7 +317,7 @@ export const DEFAULT_STORE_BANNERS: StoreBanner[] = [
     title: 'كن أول من يعرف ما يهمك!',
     subtitle: 'عروض حصرية، تحديثات فورية، ومسابقات مستمرة على قناتنا',
     imageUrl: createTelegramBannerSvg(),
-    linkUrl: 'https://t.me/nexen_store',
+    linkUrl: 'https://t.me/Nexin_Store',
     actionType: 'url',
     badgeText: 'قناة التيليجرام ✈️',
     isActive: true,
@@ -344,18 +344,24 @@ export function getSavedBanners(): StoreBanner[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Ensure Telegram banner always points to https://t.me/nexen_store
+        // Ensure Telegram banner always points to https://t.me/Nexin_Store
         return parsed.map((b: StoreBanner) => {
-          if (
+          const isTg =
             b.id === 'banner-telegram' || 
             b.title?.includes('تيليجرام') || 
+            b.title?.includes('تليجرام') || 
+            b.title?.toLowerCase().includes('telegram') ||
             b.subtitle?.includes('قناتنا') ||
             b.badgeText?.includes('تيليجرام') ||
-            (b.linkUrl && b.linkUrl.includes('t.me'))
-          ) {
+            b.badgeText?.includes('تليجرام') ||
+            b.badgeText?.toLowerCase().includes('telegram') ||
+            (b.linkUrl && b.linkUrl.toLowerCase().includes('t.me')) ||
+            (b.linkUrl && b.linkUrl.toLowerCase().includes('telegram'));
+
+          if (isTg) {
             return {
               ...b,
-              linkUrl: 'https://t.me/nexen_store',
+              linkUrl: 'https://t.me/Nexin_Store',
               actionType: 'url',
               badgeText: b.badgeText || 'انضم لقناة التيليجرام ✈️',
             };

@@ -555,6 +555,11 @@ export async function createNewOrder(
   orderId?: string;
   user?: { id: string; balance: number; currency: string };
   isDuplicate?: boolean;
+  insufficientBalance?: boolean;
+  refunded?: boolean;
+  refundAmount?: number;
+  requiredBalance?: number;
+  currentBalance?: number;
 }> {
   try {
     const headers: Record<string, string> = {
@@ -586,9 +591,17 @@ export async function createNewOrder(
         orderId: String(orderId),
         user: json.user,
         isManualQueue: !!json.isManualQueue,
+        refunded: !!json.refunded,
+        refundAmount: json.refundAmount,
       };
     } else {
       const errorMsg = json?.error || json?.message || `فشل إنشاء الطلب (كود الرد: ${res.status})`;
+      const isInsufficient =
+        Boolean(json?.insufficientBalance) ||
+        String(errorMsg).includes('غير كافي') ||
+        String(errorMsg).includes('رصيدك غير كافي') ||
+        (res.status === 400 && String(errorMsg).includes('رصيد'));
+
       return {
         success: false,
         error: errorMsg,
@@ -597,6 +610,12 @@ export async function createNewOrder(
         suggestedAction: json?.suggestedAction,
         data: json,
         isDuplicate: !!json?.isDuplicate,
+        insufficientBalance: isInsufficient,
+        refunded: Boolean(json?.refunded),
+        refundAmount: json?.refundAmount,
+        user: json?.user,
+        requiredBalance: json?.requiredBalance,
+        currentBalance: json?.currentBalance,
       };
     }
   } catch (err: any) {

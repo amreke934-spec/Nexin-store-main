@@ -2540,10 +2540,11 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
     }
 
     // 5. Balance Check
-    // "تحقق من رصيد المستخدم الفعلي عند انشاء طلب شراء بعدها اما يتابع الشحن او يظهر له رصيد حسابك غير كافي ( في حال عدم توفر رصيد للمستخدم )"
+    // "تحقق من رصيد المستخدم قبل إرسال الطلب في حال كان رصيد المستخدم غير كافي أظهر له شاشة منبثقة رصيدك غير كافي"
     if (userBalance < costInUserCurrency) {
       return res.status(400).json({
-        error: 'رصيد حسابك غير كافي',
+        error: 'رصيدك غير كافي',
+        insufficientBalance: true,
         requiredBalance: costInUserCurrency,
         currentBalance: userBalance,
         currency: userCurrency,
@@ -2605,7 +2606,11 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
 
     if (deductRes.rows.length === 0) {
       return res.status(400).json({
-        error: 'رصيد حسابك غير كافي',
+        error: 'رصيدك غير كافي',
+        insufficientBalance: true,
+        requiredBalance: costInUserCurrency,
+        currentBalance: userBalance,
+        currency: userCurrency,
       });
     }
 

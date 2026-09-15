@@ -17,11 +17,12 @@ import {
   CreditCard,
 } from 'lucide-react';
 import { Product, CustomerUser, OrderItem, DynamicFieldConfig, OrderOptions } from '../types';
-import { createNewOrder } from '../services/scStoreApi';
+import { createNewOrder, formatCurrencyDisplay } from '../services/scStoreApi';
 import { saveOrderToDb } from '../services/dbApi';
 import { getProductFieldMetadata, getProductServiceType } from '../utils/productUtils';
-import { convertToSyp, formatSypNumber, formatPriceSyp } from '../utils/currencyUtils';
+import { convertToSyp, formatSypNumber, formatPriceSyp, getExchangeRate } from '../utils/currencyUtils';
 import { normalizeSyrianPhoneNumber, detectSyrianNetwork } from '../utils/searchUtils';
+import { InsufficientBalanceModal } from './InsufficientBalanceModal';
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -31,6 +32,8 @@ interface OrderModalProps {
   onClose: () => void;
   onOrderSuccess: (order: OrderItem) => void;
   onNavigateToTracking: (orderId: string) => void;
+  onNavigateDeposit?: () => void;
+  onOpenAuth?: (mode?: 'login' | 'register') => void;
 }
 
 export const OrderModal: React.FC<OrderModalProps> = ({
@@ -41,6 +44,8 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   onClose,
   onOrderSuccess,
   onNavigateToTracking,
+  onNavigateDeposit,
+  onOpenAuth,
 }) => {
   const [qty, setQty] = useState<number>(1);
   const [dynamicFields, setDynamicFields] = useState<Record<string, string>>({});
@@ -48,6 +53,25 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [successOrder, setSuccessOrder] = useState<OrderItem | null>(null);
   const [copiedId, setCopiedId] = useState<boolean>(false);
+
+  // Insufficient Balance Modal State
+  const [showInsufficientModal, setShowInsufficientModal] = useState<boolean>(false);
+  const [insufficientInfo, setInsufficientInfo] = useState<{
+    currentBalance: number;
+    requiredAmount: number;
+    currency: string;
+  }>({
+    currentBalance: 0,
+    requiredAmount: 0,
+    currency: 'SYP',
+  });
+
+  // Refund Notification Banner State
+  const [refundNotice, setRefundNotice] = useState<{
+    amount: number;
+    currency: string;
+    message: string;
+  } | null>(null);
 
   const fieldMeta = getProductFieldMetadata(product);
   const serviceType = getProductServiceType(product);
@@ -93,12 +117,48 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     }));
   };
 
+  const isCashProduct = Boolean(product?.isCash || product?.sectionKey === 'cashbalances' || (product as any)?.cashType);
+  const enteredCashAmount = Number(dynamicFields['amount'] || qty || product?.price || 0);
+  const totalRawPrice = isCashProduct ? enteredCashAmount : (product?.price || 0) * qty;
+  const totalSypAmount = convertToSyp(totalRawPrice, product?.currency || 'USD');
+  const formattedTotalPrice = `${formatSypNumber(totalSypAmount)} ل.س`;
+
+  const userCurrency = (currentUser?.currency || 'USD').toUpperCase();
+  const userBalance = Number(currentUser?.balance || 0);
+  const exchangeRate = getExchangeRate();
+
+  let requiredCostInUserCurrency = totalRawPrice;
+  if (userCurrency === 'USD' && (product?.currency || 'USD').toUpperCase() === 'SYP') {
+    requiredCostInUserCurrency = exchangeRate > 0 ? (totalRawPrice / exchangeRate) : (totalRawPrice / 15000);
+    requiredCostInUserCurrency = Math.round(requiredCostInUserCurrency * 100) / 100;
+  } else if (userCurrency === 'SYP' && (product?.currency || 'USD').toUpperCase() === 'USD') {
+    requiredCostInUserCurrency = totalSypAmount;
+  } else {
+    requiredCostInUserCurrency = userCurrency === 'USD'
+      ? Math.round(totalRawPrice * 100) / 100
+      : Math.round(totalRawPrice);
+  }
+
+  const hasSufficientBalance = Boolean(currentUser && userBalance >= requiredCostInUserCurrency);
+
   const handleOrderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setRefundNotice(null);
+
+    // 1. Pre-submission Balance Verification
+    if (!currentUser || userBalance < requiredCostInUserCurrency) {
+      setInsufficientInfo({
+        currentBalance: userBalance,
+        requiredAmount: requiredCostInUserCurrency,
+        currency: userCurrency,
+      });
+      setShowInsufficientModal(true);
+      return;
+    }
 
     // Validate fields
-    const fields = product.dynamicFields && product.dynamicFields.length > 0
+    const fields = product?.dynamicFields && product.dynamicFields.length > 0
       ? product.dynamicFields
       : [{ name: fieldMeta.primaryFieldName, label: fieldMeta.fieldLabel, required: true }];
 
@@ -130,7 +190,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       }
 
       let payload: any;
-      if (product.isCash || product.sectionKey === 'cashbalances' || (product as any).cashType) {
+      if (product?.isCash || product?.sectionKey === 'cashbalances' || (product as any)?.cashType) {
         const resolvedType = String((product as any).cashType || '').toLowerCase();
         const normalizedCashType = (resolvedType.includes('mtn') || product.name?.toLowerCase().includes('mtn'))
           ? 'mtn_cash'
@@ -152,7 +212,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           price: cashAmount,
           currency: product.currency || 'SYP',
         };
-      } else {
+      } else if (product) {
         payload = {
           productId: product.productId,
           qty: qty,
@@ -169,20 +229,35 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
       const result = await createNewOrder(payload);
 
+      // Check if server returned insufficient balance
+      if (result.insufficientBalance) {
+        setInsufficientInfo({
+          currentBalance: result.currentBalance !== undefined ? result.currentBalance : userBalance,
+          requiredAmount: result.requiredBalance !== undefined ? result.requiredBalance : requiredCostInUserCurrency,
+          currency: userCurrency,
+        });
+        setShowInsufficientModal(true);
+        return;
+      }
+
       if (result.success && result.orderId) {
+        if (result.user?.balance !== undefined) {
+          window.dispatchEvent(new CustomEvent('nexen-balance-updated', { detail: { balance: result.user.balance } }));
+        }
+
         const rawStatus = (result.data?.order?.status || result.data?.status || 'processing').toLowerCase();
         const initialStatus = rawStatus.includes('complete') ? 'completed' : 'processing';
 
         const newOrder: OrderItem = {
           id: result.orderId,
           orderId: result.orderId,
-          productId: product.productId,
-          productName: product.name,
-          category: product.category,
+          productId: product?.productId || '',
+          productName: product?.name || '',
+          category: product?.category || '',
           qty: qty,
-          price: product.price,
-          total: product.price * qty,
-          currency: product.currency || 'SYP',
+          price: product?.price || 0,
+          total: (product?.price || 0) * qty,
+          currency: product?.currency || 'SYP',
           dynamicFields: cleanedFields,
           status: initialStatus,
           createdAt: new Date().toISOString(),
@@ -196,6 +271,16 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         // Persist order in Neon PostgreSQL database
         saveOrderToDb(newOrder, currentUser?.id).catch((e) => console.warn('Order DB persist notice:', e));
       } else {
+        if (result.refunded) {
+          if (result.user?.balance !== undefined) {
+            window.dispatchEvent(new CustomEvent('nexen-balance-updated', { detail: { balance: result.user.balance } }));
+          }
+          setRefundNotice({
+            amount: result.refundAmount || requiredCostInUserCurrency,
+            currency: userCurrency,
+            message: result.error || 'فشلت عملية شراء الطلب لدى المزود، وتمت إعادة ثمن الطلب إلى رصيدك بالكامل فوراً.',
+          });
+        }
         setError(result.error || 'فشلت عملية إنشاء الطلب، يرجى التحقق من الرصيد والبيانات المدخلة.');
       }
     } catch (err: any) {
@@ -210,12 +295,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     setCopiedId(true);
     setTimeout(() => setCopiedId(false), 2500);
   };
-
-  const isCashProduct = Boolean(product.isCash || product.sectionKey === 'cashbalances' || (product as any).cashType);
-  const enteredCashAmount = Number(dynamicFields['amount'] || qty || product.price);
-  const totalRawPrice = isCashProduct ? enteredCashAmount : product.price * qty;
-  const totalSypAmount = convertToSyp(totalRawPrice, product.currency || 'USD');
-  const formattedTotalPrice = `${formatSypNumber(totalSypAmount)} ل.س`;
 
   // Network operator mismatch check
   const enteredPhone = dynamicFields['phone_number'] || dynamicFields['wallet'] || dynamicFields[fieldMeta.primaryFieldName] || dynamicFields['Player_ID'] || '';
@@ -555,6 +634,68 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 </div>
               )}
 
+              {/* Refund Notice Banner */}
+              {refundNotice && (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-200 text-xs flex items-start gap-2 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+                  <div className="space-y-0.5 text-right">
+                    <p className="font-bold">تمت إعادة الرصيد إلى محفظتك بنجاح</p>
+                    <p className="text-[11px] text-emerald-700 dark:text-emerald-300">{refundNotice.message}</p>
+                    <p className="font-mono font-bold text-emerald-900 dark:text-emerald-100 mt-1">
+                      المبلغ المسترجع: {formatCurrencyDisplay(refundNotice.amount, refundNotice.currency)}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Live Wallet Balance Status */}
+              <div className={`p-3 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                hasSufficientBalance
+                  ? 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10'
+                  : 'bg-red-50/70 dark:bg-red-950/20 border-red-200 dark:border-red-900/40'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                    hasSufficientBalance
+                      ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400'
+                  }`}>
+                    <Wallet className="w-4 h-4" />
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 block">رصيد حسابك:</span>
+                    <span className="font-bold font-mono text-gray-900 dark:text-white">
+                      {currentUser ? formatCurrencyDisplay(userBalance, userCurrency) : '0.00 ل.س'}
+                    </span>
+                  </div>
+                </div>
+
+                {hasSufficientBalance ? (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold text-[11px] flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    رصيد كافٍ
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!currentUser && onOpenAuth) {
+                        onClose();
+                        onOpenAuth('login');
+                      } else if (onNavigateDeposit) {
+                        onClose();
+                        onNavigateDeposit();
+                      } else {
+                        setShowInsufficientModal(true);
+                      }
+                    }}
+                    className="text-red-600 dark:text-red-400 hover:underline font-bold text-[11px] cursor-pointer"
+                  >
+                    شحن الرصيد
+                  </button>
+                )}
+              </div>
+
               {/* Error Message */}
               {error && (
                 <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 text-red-600 dark:text-red-300 text-xs flex items-start gap-2">
@@ -604,6 +745,27 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Insufficient Balance Modal Popup */}
+      <InsufficientBalanceModal
+        isOpen={showInsufficientModal}
+        onClose={() => setShowInsufficientModal(false)}
+        currentBalance={insufficientInfo.currentBalance}
+        requiredAmount={insufficientInfo.requiredAmount}
+        currency={insufficientInfo.currency}
+        isLoggedIn={Boolean(currentUser)}
+        onNavigateDeposit={() => {
+          setShowInsufficientModal(false);
+          onClose();
+          if (onNavigateDeposit) onNavigateDeposit();
+        }}
+        onOpenAuth={() => {
+          setShowInsufficientModal(false);
+          onClose();
+          if (onOpenAuth) onOpenAuth('login');
+        }}
+        productName={product?.name}
+      />
     </div>
   );
 };

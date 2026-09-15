@@ -414,6 +414,13 @@ export default function App() {
   // Handle successful order creation
   const handleOrderSuccess = useCallback((newOrder: OrderItem) => {
     setOrders((prev) => [newOrder, ...prev]);
+    // Refresh user profile and balance immediately
+    if (currentUserRef.current?.id) {
+      fetchUserProfile(currentUserRef.current.id).then((fresh) => {
+        if (fresh) setCurrentUser(fresh);
+      });
+      refreshUserOrders(currentUserRef.current.id);
+    }
     // Refresh merchant balance if applicable
     if (merchantInfo && merchantInfo.balance >= newOrder.total) {
       setMerchantInfo((prev) =>
@@ -428,7 +435,7 @@ export default function App() {
     } else {
       loadMerchantData();
     }
-  }, [merchantInfo, loadMerchantData]);
+  }, [merchantInfo, loadMerchantData, refreshUserOrders]);
 
   // Navigation callbacks
   const handleNavigate = useCallback((tab: any) => {
@@ -689,6 +696,8 @@ export default function App() {
               onNavigateToTracking={handleNavigateToTracking}
               onNavigateHome={handleNavigateHome}
               onNavigateAdmin={(tab) => handleNavigateAdmin(tab as any)}
+              onNavigateDeposit={handleNavigateDeposit}
+              onOpenAuth={handleOpenAuth}
             />
           ) : isLockedForCurrentUser ? (
             <MaintenanceScreen

@@ -65,7 +65,7 @@ const SCHEMA_DEFINITIONS: TableDefinition[] = [
       { name: 'phone', type: 'VARCHAR(100)' },
       { name: 'password_hash', type: 'VARCHAR(255)' },
       { name: 'balance', type: 'NUMERIC(15, 2)', default: '0.00' },
-      { name: 'currency', type: 'VARCHAR(20)', default: "'USD'" },
+      { name: 'currency', type: 'VARCHAR(20)', default: "'SYP'" },
       { name: 'role', type: 'VARCHAR(50)', default: "'customer'" },
       { name: 'avatar', type: 'TEXT' },
       { name: 'api_key', type: 'TEXT' },
@@ -261,6 +261,17 @@ export async function initializeDatabase(): Promise<{ success: boolean; error?: 
         VALUES ('deposit_methods', $1, NOW())
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
       `, [JSON.stringify(defaultDepositMethods)]);
+    }
+
+    // Always ensure users balance currency is Syrian Pounds (SYP)
+    try {
+      await client.query(`
+        ALTER TABLE users ALTER COLUMN currency SET DEFAULT 'SYP';
+        UPDATE users SET currency = 'SYP' WHERE currency IS NULL OR currency != 'SYP';
+      `);
+      console.log('✅ [Neon DB] Users currency column verified as SYP');
+    } catch (migErr) {
+      console.warn('⚠️ [Neon DB] Non-fatal migration error setting currency to SYP:', migErr);
     }
 
 

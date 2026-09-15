@@ -862,12 +862,22 @@ export const AdminDepositsTab: React.FC<AdminDepositsTabProps> = ({
                 <span className="font-mono font-bold">{formatSypNumber(actionModal.request.amount)} {actionModal.request.currency}</span>
               </div>
               <div className="flex justify-between">
+                <span className="text-slate-500">سعر الصرف المعتمد:</span>
+                {String(actionModal.request.currency).toUpperCase() === 'SYP' || String(actionModal.request.currency).includes('ليرة') ? (
+                  <span className="font-bold text-slate-600 dark:text-slate-300">بدون سعر صرف (إيداع محلي بالليرة)</span>
+                ) : (
+                  <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                    1 {actionModal.request.currency} = {formatSypNumber(actionModal.request.exchangeRateToSyp || 1)} ل.س
+                  </span>
+                )}
+              </div>
+              <div className="flex justify-between">
                 <span className="text-slate-500">رقم العملية:</span>
                 <span className="font-mono font-bold text-[#7F00FF]">{actionModal.request.txNumber}</span>
               </div>
               <div className="pt-2 border-t border-slate-200 dark:border-white/10 flex justify-between items-baseline">
                 <span className="font-bold text-slate-900 dark:text-white">
-                  {actionModal.action === 'approve' ? 'سيتم إضافة رصيد بقيمة:' : 'المبلغ المطلوب:'}
+                  {actionModal.action === 'approve' ? 'سيتم إضافة رصيد لحساب العميل:' : 'المبلغ المطلوب:'}
                 </span>
                 <span className="text-base font-black text-emerald-600 dark:text-emerald-400 font-mono">
                   {formatSypNumber(actionModal.request.sypAmount)} ل.س

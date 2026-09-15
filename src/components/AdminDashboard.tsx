@@ -1104,7 +1104,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                     </td>
                     <td className="py-3.5">
                       <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 block text-xs sm:text-sm">
-                        {formatSypNumber(convertToSyp(u.balance || 0, 'USD', exchangeRate, false))} ل.س
+                        {formatSypNumber(u.balance || 0)} ل.س
                       </span>
                     </td>
                     <td className="py-3.5 font-mono">
@@ -2213,35 +2213,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
               {/* Wallet Balance with quick adjustment */}
               <div>
                 <label className="font-bold text-slate-700 dark:text-slate-200 block mb-1">
-                  رصيد المحفظة (الرصيد الأساسي)
+                  رصيد المحفظة (بالليرة السورية SYP)
                 </label>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
-                    step="1000"
+                    step="5000"
                     min="0"
                     value={editFormData.balance}
                     onChange={(e) => setEditFormData({ ...editFormData, balance: parseFloat(e.target.value) || 0 })}
                     className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono font-bold focus:outline-none focus:border-[#7F00FF]"
                   />
-                  {/* Quick buttons */}
+                  {/* Quick buttons in Syrian Pounds */}
                   <button
                     type="button"
-                    onClick={() => setEditFormData({ ...editFormData, balance: editFormData.balance + 10 })}
-                    className="px-2.5 py-2.5 rounded-xl bg-purple-50 dark:bg-purple-950 text-[#7F00FF] dark:text-purple-300 font-bold border border-purple-200 dark:border-purple-800 hover:bg-purple-100 cursor-pointer"
+                    onClick={() => setEditFormData({ ...editFormData, balance: (editFormData.balance || 0) + 50000 })}
+                    className="px-2.5 py-2.5 rounded-xl bg-purple-50 dark:bg-purple-950 text-[#7F00FF] dark:text-purple-300 font-bold border border-purple-200 dark:border-purple-800 hover:bg-purple-100 cursor-pointer whitespace-nowrap text-xs"
+                    title="إضافة 50,000 ل.س"
                   >
-                    +150 ألف
+                    +50 ألف
                   </button>
                   <button
                     type="button"
-                    onClick={() => setEditFormData({ ...editFormData, balance: editFormData.balance + 50 })}
-                    className="px-2.5 py-2.5 rounded-xl bg-purple-50 dark:bg-purple-950 text-[#7F00FF] dark:text-purple-300 font-bold border border-purple-200 dark:border-purple-800 hover:bg-purple-100 cursor-pointer"
+                    onClick={() => setEditFormData({ ...editFormData, balance: (editFormData.balance || 0) + 100000 })}
+                    className="px-2.5 py-2.5 rounded-xl bg-purple-50 dark:bg-purple-950 text-[#7F00FF] dark:text-purple-300 font-bold border border-purple-200 dark:border-purple-800 hover:bg-purple-100 cursor-pointer whitespace-nowrap text-xs"
+                    title="إضافة 100,000 ل.س"
                   >
-                    +750 ألف
+                    +100 ألف
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditFormData({ ...editFormData, balance: (editFormData.balance || 0) + 500000 })}
+                    className="px-2.5 py-2.5 rounded-xl bg-purple-50 dark:bg-purple-950 text-[#7F00FF] dark:text-purple-300 font-bold border border-purple-200 dark:border-purple-800 hover:bg-purple-100 cursor-pointer whitespace-nowrap text-xs"
+                    title="إضافة 500,000 ل.س"
+                  >
+                    +500 ألف
                   </button>
                 </div>
                 <span className="text-[11px] text-slate-400 mt-1 block font-mono">
-                  القيمة الإجمالية: {formatSypNumber(convertToSyp(editFormData.balance, 'USD', exchangeRate, false))} ل.س
+                  الرصيد المحفوظ في قاعدة البيانات: {formatSypNumber(editFormData.balance || 0)} ليرة سورية (SYP)
                 </span>
               </div>
 
@@ -2356,15 +2366,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 dark:text-slate-200 block mb-1">الرصيد الافتتاحي للحساب</label>
+                <label className="font-bold text-slate-700 dark:text-slate-200 block mb-1">الرصيد الافتتاحي للحساب (بالليرة السورية SYP)</label>
                 <input
                   type="number"
-                  step="1"
+                  step="1000"
                   min="0"
                   value={createFormData.balance}
                   onChange={(e) => setCreateFormData({ ...createFormData, balance: parseFloat(e.target.value) || 0 })}
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono font-bold focus:outline-none focus:border-[#7F00FF]"
+                  placeholder="0.00"
                 />
+                <span className="text-[11px] text-slate-400 mt-1 block font-mono">
+                  الرصيد الافتراضي هو 0.00 ل.س ويتم حفظه مباشرة بالليرة السورية (SYP).
+                </span>
               </div>
 
               <div>

@@ -158,7 +158,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
           email: cleanEmail,
           phone: cleanPhone,
           balance: 0,
-          currency: 'USD',
+          currency: 'SYP',
           role: 'customer',
           createdAt: new Date().toISOString(),
         },
@@ -188,7 +188,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
           email: user.email,
           phone: user.phone,
           balance: parseFloat(user.balance || '0'),
-          currency: user.currency || 'USD',
+          currency: 'SYP',
           role: user.role || 'customer',
           savedPlayerIds: user.saved_player_ids || {},
           createdAt: user.created_at,
@@ -210,7 +210,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
         cleanPhone,
         password || null,
         0.00,
-        'USD',
+        'SYP',
         'customer',
         avatar || null,
         DEFAULT_API_KEY,
@@ -227,7 +227,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
         email: newUser.email,
         phone: newUser.phone,
         balance: parseFloat(newUser.balance || '0'),
-        currency: newUser.currency || 'USD',
+        currency: 'SYP',
         role: newUser.role || 'customer',
         savedPlayerIds: newUser.saved_player_ids || {},
         createdAt: newUser.created_at,
@@ -264,7 +264,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           email: isEmail ? cleanId.toLowerCase() : `${cleanId.replace(/\s+/g, '')}@nexenstore.com`,
           phone: !isEmail ? cleanId : undefined,
           balance: 0,
-          currency: 'USD',
+          currency: 'SYP',
           role: 'customer',
           createdAt: new Date().toISOString(),
         },
@@ -293,7 +293,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         `INSERT INTO users (id, name, email, phone, balance, currency, role, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
          RETURNING *`,
-        [newId, newName, newEmail, newPhone, 0.0, 'USD', 'customer']
+        [newId, newName, newEmail, newPhone, 0.0, 'SYP', 'customer']
       );
 
       const user = created.rows[0];
@@ -305,7 +305,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           email: user.email,
           phone: user.phone,
           balance: parseFloat(user.balance || '0'),
-          currency: user.currency || 'USD',
+          currency: 'SYP',
           role: user.role || 'customer',
           savedPlayerIds: user.saved_player_ids || {},
           createdAt: user.created_at,
@@ -330,7 +330,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         email: user.email,
         phone: user.phone,
         balance: parseFloat(user.balance || '0'),
-        currency: user.currency || 'USD',
+        currency: 'SYP',
         role: user.role || 'customer',
         savedPlayerIds: user.saved_player_ids || {},
         createdAt: user.created_at,
@@ -401,7 +401,7 @@ app.get('/api/users/profile/:idOrEmail', async (req: Request, res: Response) => 
         email: user.email,
         phone: user.phone,
         balance: parseFloat(user.balance || '0'),
-        currency: user.currency || 'USD',
+        currency: 'SYP',
         role: user.role || 'customer',
         savedPlayerIds: user.saved_player_ids || {},
         createdAt: user.created_at,
@@ -829,8 +829,14 @@ app.post('/api/deposit-requests', async (req: Request, res: Response) => {
     const feePercentage = feeEnabled ? (parseFloat(String(method.feePercentage)) || 0) : 0;
     const feeAmount = (numAmount * feePercentage) / 100;
     const netAmount = Math.max(0, numAmount - feeAmount);
-    const exchangeRateToSyp = parseFloat(String(method.exchangeRateToSyp)) || 1;
-    const sypAmount = Math.round(netAmount * exchangeRateToSyp);
+
+    const methodCurr = String(method.currency || 'SYP').trim().toUpperCase();
+    const isSypMethod = methodCurr === 'SYP' || methodCurr === 'ل.س' || methodCurr === 'ليرة' || methodCurr === 'SP';
+
+    // When currency is SYP, no exchange rate is applied (amount added as is).
+    // When currency is foreign, apply the payment method's base exchange rate.
+    const exchangeRateToSyp = isSypMethod ? 1 : (parseFloat(String(method.exchangeRateToSyp)) || 1);
+    const sypAmount = isSypMethod ? Math.round(netAmount) : Math.round(netAmount * exchangeRateToSyp);
 
     // Fetch user details
     let userName = 'مستخدم';
@@ -950,40 +956,72 @@ app.put('/api/deposit-requests/:id/status', async (req: Request, res: Response) 
       return res.json({ success: true, request: mapDbDepositRequest(depositReq), message: 'الطلب مقبول مسبقاً' });
     }
 
-    // If approving, credit user balance
+    // If approving, credit user balance in SYP
     if (status === 'approved') {
       const userRes = await pool.query('SELECT * FROM users WHERE id = $1', [depositReq.user_id]);
       if (userRes.rows.length > 0) {
         const user = userRes.rows[0];
-        const userCurrency = (user.currency || 'USD').toUpperCase();
-        let balanceToAdd = 0;
 
-        if (userCurrency === 'USD') {
-          const rate = parseFloat(depositReq.exchange_rate_to_syp || '15000');
-          balanceToAdd = rate > 0 ? (parseFloat(depositReq.syp_amount) / rate) : parseFloat(depositReq.net_amount);
+        // 1. Check if deposit method currency is Syrian Pounds
+        const reqCurrency = String(depositReq.currency || 'SYP').trim().toUpperCase();
+        const isSyp = reqCurrency === 'SYP' || reqCurrency === 'ل.س' || reqCurrency === 'ليرة' || reqCurrency === 'SP';
+
+        let sypToCredit = 0;
+        let effectiveRate = 1;
+
+        if (isSyp) {
+          // "عند الايداع بطريقة فيها العملة ليرة سورية SYP لا يوجد أي سعر صرف حيث تتم اضافة المبلغ كما هو"
+          sypToCredit = Math.round(parseFloat(depositReq.net_amount ?? depositReq.amount ?? '0'));
         } else {
-          balanceToAdd = parseFloat(depositReq.syp_amount);
+          // "عند قبول طلب إيداع بجب احتساب سعر الصرف الأساسي لطريقة الدفع بحسب العملة و سعر الصرف"
+          effectiveRate = parseFloat(depositReq.exchange_rate_to_syp || '0');
+          if (!effectiveRate || effectiveRate <= 0) {
+            try {
+              const methodRes = await pool.query('SELECT value FROM store_settings WHERE key = $1', ['deposit_methods']);
+              if (methodRes.rows.length > 0 && Array.isArray(methodRes.rows[0].value)) {
+                const foundMethod = methodRes.rows[0].value.find((m: any) => m.id === depositReq.method_id);
+                if (foundMethod && parseFloat(foundMethod.exchangeRateToSyp)) {
+                  effectiveRate = parseFloat(foundMethod.exchangeRateToSyp);
+                }
+              }
+            } catch {
+              // ignore
+            }
+          }
+          if (!effectiveRate || effectiveRate <= 0) {
+            effectiveRate = await getUsdToSypRate();
+          }
+
+          const foreignAmount = parseFloat(depositReq.net_amount ?? depositReq.amount ?? '0');
+          sypToCredit = Math.round(foreignAmount * effectiveRate);
         }
 
-        // Update user balance
+        sypToCredit = Math.max(0, sypToCredit);
+
+        // "احفظ الرصيد بالليرة السورية دائماً حتى في قاعدة البيانات اجعله ليرة سورية"
         await pool.query(
-          'UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE id = $2',
-          [balanceToAdd, user.id]
+          `UPDATE users 
+           SET balance = COALESCE(balance, 0) + $1, 
+               currency = 'SYP', 
+               updated_at = NOW() 
+           WHERE id = $2`,
+          [sypToCredit, user.id]
         );
 
-        // Record in wallet_transactions
+        // Record in wallet_transactions (always in SYP)
         const txId = `TX-${Date.now().toString().slice(-6)}`;
         await pool.query(
           `INSERT INTO wallet_transactions (id, user_id, type, amount, currency, status, payment_method, reference_id, notes, created_at)
-           VALUES ($1, $2, 'deposit', $3, $4, 'completed', $5, $6, $7, NOW())`,
+           VALUES ($1, $2, 'deposit', $3, 'SYP', 'completed', $4, $5, $6, NOW())`,
           [
             txId,
             user.id,
-            balanceToAdd,
-            userCurrency,
+            sypToCredit,
             depositReq.method_name,
             depositReq.id,
-            `إيداع معتمد: ${depositReq.amount} ${depositReq.currency} (رقم العملية: ${depositReq.tx_number})`,
+            isSyp
+              ? `إيداع معتمد: ${sypToCredit.toLocaleString()} ل.س (رقم العملية: ${depositReq.tx_number})`
+              : `إيداع معتمد: ${depositReq.amount} ${depositReq.currency} بسعر صرف ${effectiveRate} = ${sypToCredit.toLocaleString()} ل.س (رقم العملية: ${depositReq.tx_number})`,
           ]
         );
       }
@@ -1141,7 +1179,7 @@ app.get('/api/admin/users', async (_req: Request, res: Response) => {
       email: row.email,
       phone: row.phone,
       balance: parseFloat(row.balance || '0'),
-      currency: row.currency || 'USD',
+      currency: 'SYP',
       role: row.role || 'customer',
       avatar: row.avatar,
       savedPlayerIds: row.saved_player_ids || {},
@@ -1174,7 +1212,7 @@ app.put('/api/admin/users/:userId', async (req: Request, res: Response) => {
     if (!pool) {
       return res.json({
         success: true,
-        user: { id: userId, name, email, phone, balance, role },
+        user: { id: userId, name, email, phone, balance, currency: 'SYP', role },
       });
     }
 
@@ -1195,8 +1233,9 @@ app.put('/api/admin/users/:userId', async (req: Request, res: Response) => {
       values.push(phone ? String(phone).trim() : null);
     }
     if (balance !== undefined) {
+      const numBalance = parseFloat(String(balance)) || 0.0;
       updates.push(`balance = $${idx++}`);
-      values.push(parseFloat(String(balance)) || 0.0);
+      values.push(numBalance);
     }
     if (role !== undefined) {
       updates.push(`role = $${idx++}`);
@@ -1207,6 +1246,8 @@ app.put('/api/admin/users/:userId', async (req: Request, res: Response) => {
       values.push(String(password));
     }
 
+    // Always ensure currency is SYP in database
+    updates.push(`currency = 'SYP'`);
     updates.push(`updated_at = NOW()`);
     values.push(userId);
 
@@ -1223,6 +1264,27 @@ app.put('/api/admin/users/:userId', async (req: Request, res: Response) => {
     }
 
     const updatedUser = result.rows[0];
+
+    // If balance was modified by admin, log a wallet transaction
+    if (balance !== undefined) {
+      try {
+        const txId = `TX-${Date.now().toString().slice(-6)}`;
+        await pool.query(
+          `INSERT INTO wallet_transactions (id, user_id, type, amount, currency, status, payment_method, reference_id, notes, created_at)
+           VALUES ($1, $2, 'adjustment', $3, 'SYP', 'completed', 'Admin Panel', $4, $5, NOW())`,
+          [
+            txId,
+            userId,
+            parseFloat(String(balance)) || 0.0,
+            `ADM-${Date.now().toString().slice(-4)}`,
+            `تعديل رصيد يدوي من الإدارة: ${parseFloat(String(balance)) || 0.0} ل.س`,
+          ]
+        );
+      } catch (txErr: any) {
+        console.warn('Could not record admin adjustment tx:', txErr.message);
+      }
+    }
+
     return res.json({
       success: true,
       user: {
@@ -1231,7 +1293,7 @@ app.put('/api/admin/users/:userId', async (req: Request, res: Response) => {
         email: updatedUser.email,
         phone: updatedUser.phone,
         balance: parseFloat(updatedUser.balance || '0'),
-        currency: updatedUser.currency || 'USD',
+        currency: 'SYP',
         role: updatedUser.role || 'customer',
         createdAt: updatedUser.created_at,
         updatedAt: updatedUser.updated_at,
@@ -1287,7 +1349,7 @@ app.post('/api/admin/users/create', async (req: Request, res: Response) => {
           email: email.trim().toLowerCase(),
           phone,
           balance: userBalance,
-          currency: 'USD',
+          currency: 'SYP',
           role: userRole,
           createdAt: new Date().toISOString(),
         },
@@ -1298,7 +1360,7 @@ app.post('/api/admin/users/create', async (req: Request, res: Response) => {
       `INSERT INTO users (id, name, email, phone, balance, currency, role, password_hash, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
        RETURNING *;`,
-      [userId, name.trim(), email.trim().toLowerCase(), phone || null, userBalance, 'USD', userRole, password || null]
+      [userId, name.trim(), email.trim().toLowerCase(), phone || null, userBalance, 'SYP', userRole, password || null]
     );
 
     const user = insertRes.rows[0];
@@ -1310,7 +1372,7 @@ app.post('/api/admin/users/create', async (req: Request, res: Response) => {
         email: user.email,
         phone: user.phone,
         balance: parseFloat(user.balance || '0'),
-        currency: user.currency || 'USD',
+        currency: 'SYP',
         role: user.role || 'customer',
         createdAt: user.created_at,
       },
@@ -2487,7 +2549,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       const fallbackName = customerName || 'عميل المتجر';
       const insertFallback = await pool.query(
         `INSERT INTO users (id, name, email, balance, currency, role, created_at, updated_at)
-         VALUES ($1, $2, $3, 0.00, 'USD', 'customer', NOW(), NOW())
+         VALUES ($1, $2, $3, 0.00, 'SYP', 'customer', NOW(), NOW())
          ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
          RETURNING id, name, email, balance, currency, role;`,
         [fallbackId, fallbackName, fallbackEmail]
@@ -2497,9 +2559,9 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       dbUser = userRes.rows[0];
     }
     const userBalance = parseFloat(dbUser.balance || '0');
-    const userCurrency = (dbUser.currency || 'USD').toUpperCase();
+    const userCurrency = 'SYP';
 
-    // 4. Calculate actual required order cost
+    // 4. Calculate actual required order cost in SYP
     let unitPrice = Number(price || 0);
     let itemCurrency = String(currency || 'USD').toUpperCase();
     let prodName = String(productName || '').trim();
@@ -2530,13 +2592,11 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
     const usdToSyp = await getUsdToSypRate();
     let costInUserCurrency = totalRawPrice;
 
-    if (userCurrency === 'USD' && itemCurrency === 'SYP') {
-      costInUserCurrency = totalRawPrice / usdToSyp;
-      costInUserCurrency = Math.round(costInUserCurrency * 100) / 100;
-    } else if (userCurrency === 'SYP' && itemCurrency === 'USD') {
+    // Convert item cost to SYP (the user's balance currency)
+    if (itemCurrency === 'USD' || itemCurrency === '$') {
       costInUserCurrency = Math.round(totalRawPrice * usdToSyp);
     } else {
-      costInUserCurrency = userCurrency === 'USD' ? Math.round(totalRawPrice * 100) / 100 : Math.round(totalRawPrice);
+      costInUserCurrency = Math.round(totalRawPrice);
     }
 
     // 5. Balance Check
@@ -2547,7 +2607,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
         insufficientBalance: true,
         requiredBalance: costInUserCurrency,
         currentBalance: userBalance,
-        currency: userCurrency,
+        currency: 'SYP',
       });
     }
 

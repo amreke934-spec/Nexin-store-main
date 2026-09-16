@@ -59,26 +59,33 @@ export function convertToSyp(
   const adjustedAmount = applyMargin ? calculateRetailPrice(amount) : amount;
 
   if (curr === 'SYP' || curr === 'ل.س' || curr === 'SP') {
-    return adjustedAmount;
+    return Math.round(adjustedAmount * 1000) / 1000;
   }
 
   const effectiveRate = rate && rate > 0 ? rate : getExchangeRate();
-  return Math.round(adjustedAmount * effectiveRate);
+  return Math.round(adjustedAmount * effectiveRate * 1000) / 1000;
 }
 
 /**
- * Formats a number with thousands separators for Syrian Pounds / store currency (e.g. "127.84" or "150,000").
+ * Formats a number with thousands separators for Syrian Pounds / store currency,
+ * supporting up to 3 decimal places (e.g. "1,400.259" or "25,000").
  */
-export function formatSypNumber(amount: number): string {
+export function formatSypNumber(amount: number, maxDecimals: number = 3): string {
   if (typeof amount !== 'number' || isNaN(amount)) return '0';
-  if (Number.isInteger(amount)) {
-    return amount.toLocaleString('en-US');
+
+  // Round to maxDecimals to avoid floating point anomalies (e.g. 1400.2590000000002 -> 1400.259)
+  const factor = Math.pow(10, maxDecimals);
+  const rounded = Math.round(amount * factor) / factor;
+
+  if (Number.isInteger(rounded)) {
+    return rounded.toLocaleString('en-US');
   }
-  // For numbers with decimals, preserve exact decimals from supplier
-  if (amount < 10) {
-    return Number(amount.toFixed(4)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-  }
-  return Number(amount.toFixed(2)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Display up to 3 decimal places without losing decimals
+  return rounded.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxDecimals,
+  });
 }
 
 /**

@@ -1551,8 +1551,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                       Math.round(
                         (profitConfig.enabled
                           ? (10 * (1 + (parseFloat(profitPercentageInput) || 0) / 100)) + (parseFloat(profitFixedInput) || 0)
-                          : 10) * exchangeRate
-                      )
+                          : 10) * exchangeRate * 1000
+                      ) / 1000
                     )} ل.س
                   </span>
                 </div>

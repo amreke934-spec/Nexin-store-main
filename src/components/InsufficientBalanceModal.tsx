@@ -34,7 +34,7 @@ export const InsufficientBalanceModal: React.FC<InsufficientBalanceModalProps> =
     if (isUsd) {
       return `$${num.toFixed(2)}`;
     }
-    return `${formatSypNumber(Math.round(num))} ل.س`;
+    return `${formatSypNumber(num)} ل.س`;
   };
 
   const handleDepositClick = () => {

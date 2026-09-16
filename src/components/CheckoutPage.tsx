@@ -29,6 +29,7 @@ import { normalizeSyrianPhoneNumber, detectSyrianNetwork } from '../utils/search
 import { isUserAdmin } from '../utils/adminUtils';
 import { extractChargedAccount } from '../utils/orderUtils';
 import { InsufficientBalanceModal } from './InsufficientBalanceModal';
+import { OrderSuccessModal } from './OrderSuccessModal';
 
 interface CheckoutPageProps {
   product: Product;
@@ -69,6 +70,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     suggestedAction?: string;
   } | null>(null);
   const [successOrder, setSuccessOrder] = useState<OrderItem | null>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState<boolean>(false);
+  const [userBalanceAfter, setUserBalanceAfter] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<boolean>(false);
 
   // Insufficient Balance Modal State
@@ -112,13 +115,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   let requiredCostInUserCurrency = totalRawPrice;
   if (userCurrency === 'USD' && (product.currency || 'USD').toUpperCase() === 'SYP') {
     requiredCostInUserCurrency = exchangeRate > 0 ? (totalRawPrice / exchangeRate) : (totalRawPrice / 15000);
-    requiredCostInUserCurrency = Math.round(requiredCostInUserCurrency * 100) / 100;
+    requiredCostInUserCurrency = Math.round(requiredCostInUserCurrency * 1000) / 1000;
   } else if (userCurrency === 'SYP' && (product.currency || 'USD').toUpperCase() === 'USD') {
     requiredCostInUserCurrency = totalSypAmount;
   } else {
-    requiredCostInUserCurrency = userCurrency === 'USD'
-      ? Math.round(totalRawPrice * 100) / 100
-      : Math.round(totalRawPrice);
+    requiredCostInUserCurrency = Math.round(totalRawPrice * 1000) / 1000;
   }
 
   const hasSufficientBalance = Boolean(currentUser && userBalance >= requiredCostInUserCurrency);
@@ -260,8 +261,14 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
 
       if (result.success && result.orderId) {
         // Balance deducted successfully and order registered
+        let afterBal: number | null = null;
         if (result.user?.balance !== undefined) {
+          afterBal = Number(result.user.balance);
+          setUserBalanceAfter(afterBal);
           window.dispatchEvent(new CustomEvent('nexen-balance-updated', { detail: { balance: result.user.balance } }));
+        } else if (currentUser?.balance !== undefined) {
+          afterBal = Math.max(0, userBalance - requiredCostInUserCurrency);
+          setUserBalanceAfter(afterBal);
         }
 
         const rawStatus = (result.data?.order?.status || result.data?.status || 'processing').toLowerCase();
@@ -286,6 +293,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
         };
 
         setSuccessOrder(newOrder);
+        setShowSuccessModal(true);
         onOrderSuccess(newOrder);
         // Persist order in DB
         saveOrderToDb(newOrder, currentUser?.id).catch((e) => console.warn('Order DB persist notice:', e));
@@ -800,6 +808,26 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
           if (onOpenAuth) onOpenAuth('login');
         }}
         productName={product.name}
+      />
+
+      {/* Order Success Popup Modal with full details */}
+      <OrderSuccessModal
+        isOpen={showSuccessModal}
+        order={successOrder}
+        onClose={() => setShowSuccessModal(false)}
+        onNavigateToTracking={(orderId) => {
+          setShowSuccessModal(false);
+          if (onNavigateToTracking) {
+            onNavigateToTracking(orderId);
+          }
+        }}
+        onNavigateHome={() => {
+          setShowSuccessModal(false);
+          if (onNavigateHome) {
+            onNavigateHome();
+          }
+        }}
+        remainingBalance={userBalanceAfter}
       />
     </div>
   );

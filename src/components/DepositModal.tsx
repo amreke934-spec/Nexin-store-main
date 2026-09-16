@@ -159,7 +159,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
     const feeAmount = (num * feePct) / 100;
     const netAmount = Math.max(0, num - feeAmount);
     const rate = Number(selectedMethod.exchangeRateToSyp) || 1;
-    const sypAmount = Math.round(netAmount * rate);
+    const sypAmount = Math.round(netAmount * rate * 1000) / 1000;
 
     return {
       amount: num,

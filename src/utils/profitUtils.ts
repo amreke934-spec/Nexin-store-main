@@ -163,8 +163,5 @@ export function calculateRetailPrice(
   if (Number.isInteger(finalPrice)) {
     return finalPrice;
   }
-  if (finalPrice < 10) {
-    return parseFloat(finalPrice.toFixed(4));
-  }
-  return parseFloat(finalPrice.toFixed(2));
+  return parseFloat(finalPrice.toFixed(4));
 }

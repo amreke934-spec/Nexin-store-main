@@ -15,12 +15,17 @@ import {
   CheckCircle2,
   ChevronDown,
   Search,
-  Check
+  Check,
+  Clock,
+  RotateCcw,
+  KeyRound,
+  AlertCircle
 } from 'lucide-react';
 import { CustomerUser, Product, OrderItem } from '../types';
 import { DEFAULT_API_KEY } from '../services/scStoreApi';
-import { registerUserInDb, loginUserInDb } from '../services/dbApi';
+import { registerUserInDb, loginUserInDb, verifyEmailOtp, resendEmailOtp } from '../services/dbApi';
 import { NexenLogo } from './NexenLogo';
+import { OtpVerificationCard } from './OtpVerificationCard';
 
 export interface CountryCodeItem {
   name: string;
@@ -72,10 +77,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   pendingProduct,
   initialMode = 'login',
 }) => {
-  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'register' | 'verify'>(initialMode);
 
   useEffect(() => {
-    if (initialMode) {
+    if (initialMode && mode !== 'verify') {
       setMode(initialMode);
     }
   }, [initialMode]);
@@ -96,9 +101,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
+  // Email verification state
+  const [verificationEmail, setVerificationEmail] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [expirySeconds, setExpirySeconds] = useState(600); // 10 minutes
+  const [resendCooldown, setResendCooldown] = useState(45); // 45 seconds cooldown
+  const [isResending, setIsResending] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const otpInputRef = useRef<HTMLInputElement>(null);
 
   // Close country dropdown on click outside
   useEffect(() => {
@@ -122,6 +136,33 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     }
   }, [isCountryDropdownOpen]);
 
+  // Focus OTP input when entering verify mode
+  useEffect(() => {
+    if (mode === 'verify') {
+      setTimeout(() => {
+        otpInputRef.current?.focus();
+      }, 100);
+    }
+  }, [mode]);
+
+  // Expiry timer countdown
+  useEffect(() => {
+    if (mode !== 'verify' || expirySeconds <= 0) return;
+    const interval = setInterval(() => {
+      setExpirySeconds((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [mode, expirySeconds]);
+
+  // Resend cooldown timer countdown
+  useEffect(() => {
+    if (mode !== 'verify' || resendCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [mode, resendCooldown]);
+
   // Filter countries based on search
   const filteredCountries = COUNTRY_CODES.filter((c) => {
     const query = countrySearchQuery.toLowerCase().trim();
@@ -134,9 +175,77 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     );
   });
 
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0 || isResending || !verificationEmail) return;
+    setIsResending(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const res = await resendEmailOtp(verificationEmail);
+      if (res.success) {
+        setSuccessMessage(res.message || 'تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني بنجاح.');
+        setResendCooldown(res.cooldownSeconds || 45);
+        setExpirySeconds(600); // Reset to 10 minutes
+      } else {
+        setError(res.error || 'تعذر إعادة إرسال الرمز. يرجى المحاولة بعد قليل.');
+        if (res.cooldownSeconds) {
+          setResendCooldown(res.cooldownSeconds);
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'فشل الاتصال لإعادة إرسال الرمز');
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  const handleVerifyOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMessage('');
+
+    const cleanOtp = otpCode.trim().replace(/\s+/g, '');
+    if (!cleanOtp || cleanOtp.length < 6) {
+      setError('يرجى إدخال رمز التحقق المكون من 6 أرقام كاملاً');
+      return;
+    }
+
+    if (expirySeconds <= 0) {
+      setError('انتهت صلاحية الرمز. يرجى الضغط على "إعادة إرسال الرمز" لاستلام رمز جديد.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const res = await verifyEmailOtp(verificationEmail, cleanOtp);
+      if (res.success && res.user) {
+        setIsLoading(false);
+        setSuccessMessage('تم التحقق بنجاح! جاري الدخول إلى حسابك...');
+        setTimeout(() => {
+          onLoginSuccess(res.user!, res.orders);
+        }, 500);
+      } else {
+        setIsLoading(false);
+        setError(res.error || 'رمز التحقق غير صحيح. تأكد من الأرقام وأعد المحاولة.');
+      }
+    } catch (err: any) {
+      setIsLoading(false);
+      setError(err.message || 'حدث خطأ أثناء تأكيد الرمز');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccessMessage('');
 
     if (mode === 'register') {
       // 1. Validate Name
@@ -184,12 +293,22 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           password: password || undefined,
         });
 
+        setIsLoading(false);
+
+        // Verification required: redirect to OTP verification screen
+        if (res.requiresVerification || (res.success && !res.user)) {
+          setVerificationEmail(res.email || trimmedEmail);
+          setMode('verify');
+          setExpirySeconds(600); // 10 minutes
+          setResendCooldown(45);
+          setSuccessMessage(res.message || 'تم إرسال رمز التحقق المكون من 6 أرقام إلى بريدك الإلكتروني.');
+          return;
+        }
+
         if (res.success && res.user) {
-          setIsLoading(false);
           onLoginSuccess(res.user, res.orders);
         } else {
-          setIsLoading(false);
-          setError(res.error || 'تعذر تسجيل الحساب في قاعدة البيانات، يرجى المحاولة مجدداً');
+          setError(res.error || 'تعذر تسجيل الحساب، يرجى المحاولة مجدداً');
         }
       } catch (err: any) {
         setIsLoading(false);
@@ -212,16 +331,26 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           password: password || undefined,
         });
 
+        setIsLoading(false);
+
+        // Account exists but requires email verification
+        if (res.requiresVerification) {
+          setVerificationEmail(res.email || trimmedIdentifier);
+          setMode('verify');
+          setExpirySeconds(600);
+          setResendCooldown(45);
+          setError(res.error || 'يرجى تأكيد بريدك الإلكتروني لإكمال الدخول.');
+          return;
+        }
+
         if (res.success && res.user) {
-          setIsLoading(false);
           onLoginSuccess(res.user, res.orders);
         } else {
-          setIsLoading(false);
           setError(res.error || 'بيانات الدخول غير صحيحة أو الحساب غير مسجل في قاعدة البيانات');
         }
       } catch (err: any) {
         setIsLoading(false);
-        setError(err.message || 'فشل الاتصال بقاعدة البيانات للتحقق من الحساب');
+        setError(err.message || 'فشل الاتصال بقاعدة البيانات لتسجيل الدخول');
       }
     }
   };
@@ -249,71 +378,84 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
         {/* Main Full-Page Auth Card */}
         <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl p-6 sm:p-10 transition-all">
-          {/* Top Brand & Header Section */}
-          <div className="text-center mb-7">
-            <div className="flex justify-center mb-3.5">
-              <div className="w-16 h-16 rounded-2xl bg-purple-50 dark:bg-purple-950/60 border border-purple-100 dark:border-purple-800/50 flex items-center justify-center p-2.5 shadow-md shadow-purple-500/10 group">
-                <NexenLogo size="md" showText={false} className="group-hover:scale-105 transition-transform" />
-              </div>
-            </div>
-
-            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight mb-2">
-              {mode === 'register' ? 'إنشاء حساب جديد في ' : 'تسجيل الدخول إلى '}
-              <span className="text-[#7F00FF] dark:text-purple-400">Nexen Store</span>
-            </h1>
-
-            {pendingProduct ? (
-              <div className="mt-3 p-3 rounded-2xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200/70 dark:border-purple-800/40 text-xs text-purple-900 dark:text-purple-200 flex items-center justify-center gap-2">
-                <Sparkles className="w-4 h-4 text-[#7F00FF] shrink-0" />
-                <span className="font-semibold">
-                  {mode === 'register' ? 'أنشئ حسابك الآن' : 'سجل دخولك الآن'} لمتابعة شحن باقة <strong className="underline decoration-purple-400 font-bold">{pendingProduct.name}</strong>
-                </span>
-              </div>
-            ) : (
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-                {mode === 'register'
-                  ? 'أنشئ حسابك الشخصي بخطوات بسيطة للاستفادة من خدمات الشحن الفوري والتتبع المباشر لجميع طلباتك.'
-                  : 'سجّل دخولك للوصول إلى باقات الشحن، ورصيدك، ومتابعة سجل طلباتك السابقة.'}
-              </p>
-            )}
-          </div>
-
-          {/* Mode Switcher Tabs */}
-          <div className="grid grid-cols-2 gap-1.5 bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl mb-6 border border-slate-200/60 dark:border-slate-800/60">
-            <button
-              type="button"
-              id="tab-register-btn"
-              onClick={() => {
+          {mode === 'verify' ? (
+            <OtpVerificationCard
+              email={verificationEmail}
+              initialMessage={successMessage || error}
+              onSuccess={(user, orders) => onLoginSuccess(user, orders)}
+              onBack={() => {
                 setMode('register');
                 setError('');
+                setSuccessMessage('');
               }}
-              className={`flex items-center justify-center gap-2 py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-xl transition-all cursor-pointer ${
-                mode === 'register'
-                  ? 'bg-white dark:bg-slate-800 text-[#7F00FF] dark:text-purple-300 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>إنشاء حساب جديد</span>
-            </button>
+            />
+          ) : (
+            <>
+              {/* Top Brand & Header Section */}
+              <div className="text-center mb-7">
+                <div className="flex justify-center mb-3.5">
+                  <div className="w-16 h-16 rounded-2xl bg-purple-50 dark:bg-purple-950/60 border border-purple-100 dark:border-purple-800/50 flex items-center justify-center p-2.5 shadow-md shadow-purple-500/10 group">
+                    <NexenLogo size="md" showText={false} className="group-hover:scale-105 transition-transform" />
+                  </div>
+                </div>
 
-            <button
-              type="button"
-              id="tab-login-btn"
-              onClick={() => {
-                setMode('login');
-                setError('');
-              }}
-              className={`flex items-center justify-center gap-2 py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-xl transition-all cursor-pointer ${
-                mode === 'login'
-                  ? 'bg-white dark:bg-slate-800 text-[#7F00FF] dark:text-purple-300 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <LogIn className="w-4 h-4" />
-              <span>تسجيل الدخول</span>
-            </button>
-          </div>
+                <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight mb-2">
+                  {mode === 'register' ? 'إنشاء حساب جديد في ' : 'تسجيل الدخول إلى '}
+                  <span className="text-[#7F00FF] dark:text-purple-400">Nexen Store</span>
+                </h1>
+
+                {pendingProduct ? (
+                  <div className="mt-3 p-3 rounded-2xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200/70 dark:border-purple-800/40 text-xs text-purple-900 dark:text-purple-200 flex items-center justify-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[#7F00FF] shrink-0" />
+                    <span className="font-semibold">
+                      {mode === 'register' ? 'أنشئ حسابك الآن' : 'سجل دخولك الآن'} لمتابعة شحن باقة <strong className="underline decoration-purple-400 font-bold">{pendingProduct.name}</strong>
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
+                    {mode === 'register'
+                      ? 'أنشئ حسابك الشخصي بخطوات بسيطة للاستفادة من خدمات الشحن الفوري والتتبع المباشر لجميع طلباتك.'
+                      : 'سجّل دخولك للوصول إلى باقات الشحن، ورصيدك، ومتابعة سجل طلباتك السابقة.'}
+                  </p>
+                )}
+              </div>
+
+              {/* Mode Switcher Tabs */}
+              <div className="grid grid-cols-2 gap-1.5 bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl mb-6 border border-slate-200/60 dark:border-slate-800/60">
+                <button
+                  type="button"
+                  id="tab-register-btn"
+                  onClick={() => {
+                    setMode('register');
+                    setError('');
+                  }}
+                  className={`flex items-center justify-center gap-2 py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-xl transition-all cursor-pointer ${
+                    mode === 'register'
+                      ? 'bg-white dark:bg-slate-800 text-[#7F00FF] dark:text-purple-300 shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>إنشاء حساب جديد</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="tab-login-btn"
+                  onClick={() => {
+                    setMode('login');
+                    setError('');
+                  }}
+                  className={`flex items-center justify-center gap-2 py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-xl transition-all cursor-pointer ${
+                    mode === 'login'
+                      ? 'bg-white dark:bg-slate-800 text-[#7F00FF] dark:text-purple-300 shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>تسجيل الدخول</span>
+                </button>
+              </div>
 
           {/* Authentication Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -565,6 +707,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               )}
             </button>
           </form>
+          </>
+          )}
 
           {/* Trust and Privacy Guarantee Badges */}
           <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800/60 grid grid-cols-2 gap-2 text-center text-[11px] text-slate-500 dark:text-slate-400">

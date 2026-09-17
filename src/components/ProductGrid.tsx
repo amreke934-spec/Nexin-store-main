@@ -5,7 +5,7 @@ import {
   RefreshCw, 
   ArrowRight
 } from 'lucide-react';
-import { Product, StoreBanner } from '../types';
+import { Product, StoreBanner, CustomerUser } from '../types';
 import { Breadcrumbs } from './store/Breadcrumbs';
 import { CategoryCard, CategorySummary } from './store/CategoryCard';
 import { GameCard, GameGroup } from './store/GameCard';
@@ -13,6 +13,7 @@ import { PackageCard } from './store/PackageCard';
 import { GamePackagesView } from './store/GamePackagesView';
 import { BannerSlider } from './BannerSlider';
 import { isProductSearchMatch, isGameSearchMatch } from '../utils/searchUtils';
+import { GuestAccessModal } from './GuestAccessModal';
 
 interface ProductGridProps {
   products: Product[];
@@ -22,6 +23,8 @@ interface ProductGridProps {
   onSelectProduct: (product: Product, options?: { playerId?: string; qty?: number }) => void;
   banners?: StoreBanner[];
   onOpenBannerManager?: () => void;
+  currentUser?: CustomerUser | null;
+  onOpenAuth?: (mode: 'login' | 'register') => void;
 }
 
 export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
@@ -32,6 +35,8 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
   onSelectProduct,
   banners = [],
   onOpenBannerManager,
+  currentUser,
+  onOpenAuth,
 }) => {
   // Navigation states for the 3 Tiers
   // Tier 1: selectedCategory === null && selectedGame === null (Home Categories View)
@@ -40,6 +45,10 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Guest Access Modal state
+  const [guestModalOpen, setGuestModalOpen] = useState(false);
+  const [guestTargetProduct, setGuestTargetProduct] = useState<{ name: string; image?: string } | null>(null);
 
   // Scroll to top on tier transition
   const scrollToTop = useCallback(() => {
@@ -58,20 +67,41 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
     setSelectedCategory(categoryName);
     const catProducts = products.filter((p) => (p.category || 'أخرى') === categoryName);
     const uniqueGames = Array.from(new Set(catProducts.map((p) => p.gameName || p.name || 'عام')));
-    if (uniqueGames.length === 1) {
+    if (uniqueGames.length === 1 && currentUser) {
       setSelectedGame(uniqueGames[0]);
     } else {
       setSelectedGame(null);
     }
     setSearchQuery('');
     scrollToTop();
-  }, [products, scrollToTop]);
+  }, [products, currentUser, scrollToTop]);
 
   const handleSelectGame = useCallback((gameName: string) => {
+    if (!currentUser) {
+      const matchProduct = products.find((p) => (p.gameName || p.name) === gameName);
+      setGuestTargetProduct({
+        name: gameName,
+        image: matchProduct?.image,
+      });
+      setGuestModalOpen(true);
+      return;
+    }
     setSelectedGame(gameName);
     setSearchQuery('');
     scrollToTop();
-  }, [scrollToTop]);
+  }, [currentUser, products, scrollToTop]);
+
+  const handleProductClick = useCallback((product: Product, options?: { playerId?: string; qty?: number }) => {
+    if (!currentUser) {
+      setGuestTargetProduct({
+        name: product.name,
+        image: product.image,
+      });
+      setGuestModalOpen(true);
+      return;
+    }
+    onSelectProduct(product, options);
+  }, [currentUser, onSelectProduct]);
 
   const handleNavigateBackToCategory = useCallback(() => {
     if (!selectedCategory) {
@@ -172,12 +202,12 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
     return list;
   }, [products, selectedCategory, searchQuery]);
 
-  // Auto-transition to packages if category contains only 1 game (like Syriatel or MTN)
+  // Auto-transition to packages if category contains only 1 game (like Syriatel or MTN) for logged-in users
   useEffect(() => {
-    if (selectedCategory && !selectedGame && gamesInCategory.length === 1) {
+    if (selectedCategory && !selectedGame && gamesInCategory.length === 1 && currentUser) {
       setSelectedGame(gamesInCategory[0].gameName);
     }
-  }, [selectedCategory, selectedGame, gamesInCategory]);
+  }, [selectedCategory, selectedGame, gamesInCategory, currentUser]);
 
   // 3. Packages for selected Game (Tier 3 Data)
   const packagesInGame = useMemo<Product[]>(() => {
@@ -308,7 +338,7 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
                     <PackageCard
                       key={prod.id}
                       product={prod}
-                      onSelect={onSelectProduct}
+                      onSelect={handleProductClick}
                     />
                   ))}
                 </div>
@@ -403,9 +433,25 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
           categoryName={selectedCategory}
           packages={packagesInGame}
           onBack={handleNavigateBackToCategory}
-          onSelectProduct={onSelectProduct}
+          onSelectProduct={handleProductClick}
         />
       )}
+
+      {/* Guest Mode Restriction Access Modal */}
+      <GuestAccessModal
+        isOpen={guestModalOpen}
+        onClose={() => setGuestModalOpen(false)}
+        onLogin={() => {
+          setGuestModalOpen(false);
+          onOpenAuth?.('login');
+        }}
+        onRegister={() => {
+          setGuestModalOpen(false);
+          onOpenAuth?.('register');
+        }}
+        targetProductName={guestTargetProduct?.name}
+        targetProductImage={guestTargetProduct?.image}
+      />
     </div>
   );
 });

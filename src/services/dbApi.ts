@@ -26,6 +26,11 @@ export interface AuthResponse {
   user?: CustomerUser;
   orders?: OrderItem[];
   error?: string;
+  requiresVerification?: boolean;
+  email?: string;
+  message?: string;
+  cooldownSeconds?: number;
+  expiresInMinutes?: number;
 }
 
 /**
@@ -58,7 +63,7 @@ export async function triggerDbMigration(): Promise<{ success: boolean; message?
 }
 
 /**
- * Register user in Neon Database
+ * Register user in Neon Database (requires instant OTP verification)
  */
 export async function registerUserInDb(payload: RegisterUserPayload): Promise<AuthResponse> {
   try {
@@ -69,9 +74,22 @@ export async function registerUserInDb(payload: RegisterUserPayload): Promise<Au
     });
     const data = await res.json();
     if (!res.ok) {
-      return { success: false, error: data.error || 'فشل إنشاء الحساب' };
+      return { 
+        success: false, 
+        error: data.error || 'فشل إنشاء الحساب',
+        requiresVerification: data.requiresVerification,
+        email: data.email,
+      };
     }
-    return { success: true, user: data.user, orders: data.orders || [] };
+    return { 
+      success: true, 
+      user: data.user, 
+      orders: data.orders || [],
+      requiresVerification: data.requiresVerification,
+      email: data.email,
+      message: data.message,
+      expiresInMinutes: data.expiresInMinutes,
+    };
   } catch (err: any) {
     return { success: false, error: err.message || 'فشل الاتصال بقاعدة البيانات' };
   }
@@ -89,11 +107,76 @@ export async function loginUserInDb(payload: LoginUserPayload): Promise<AuthResp
     });
     const data = await res.json();
     if (!res.ok) {
-      return { success: false, error: data.error || 'بيانات الدخول غير صحيحة' };
+      return { 
+        success: false, 
+        error: data.error || 'بيانات الدخول غير صحيحة',
+        requiresVerification: data.requiresVerification,
+        email: data.email,
+      };
     }
-    return { success: true, user: data.user, orders: data.orders || [] };
+    return { 
+      success: true, 
+      user: data.user, 
+      orders: data.orders || [],
+      requiresVerification: data.requiresVerification,
+      email: data.email,
+      message: data.message,
+    };
   } catch (err: any) {
     return { success: false, error: err.message || 'فشل الاتصال بقاعدة البيانات' };
+  }
+}
+
+/**
+ * Verify 6-digit email OTP
+ */
+export async function verifyEmailOtp(email: string, code: string): Promise<AuthResponse> {
+  try {
+    const res = await fetch('/api/auth/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'فشل التحقق من الرمز' };
+    }
+    return {
+      success: true,
+      user: data.user,
+      orders: data.orders || [],
+      message: data.message,
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل الاتصال بخادم التحقق' };
+  }
+}
+
+/**
+ * Resend 6-digit email OTP
+ */
+export async function resendEmailOtp(email: string): Promise<{ success: boolean; message?: string; error?: string; cooldownSeconds?: number }> {
+  try {
+    const res = await fetch('/api/auth/resend-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { 
+        success: false, 
+        error: data.error || 'تعذر إعادة إرسال الرمز',
+        cooldownSeconds: data.cooldownSeconds,
+      };
+    }
+    return { 
+      success: true, 
+      message: data.message || 'تم إرسال رمز جديد بنجاح',
+      cooldownSeconds: data.cooldownSeconds,
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل الاتصال بخادم التحقق' };
   }
 }
 

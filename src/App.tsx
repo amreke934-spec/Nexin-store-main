@@ -22,6 +22,7 @@ import { FloatingSupportWidget } from './components/FloatingSupportWidget';
 import { DepositPage } from './components/DepositPage';
 import { PullToRefresh } from './components/PullToRefresh';
 import { MaintenanceScreen } from './components/MaintenanceScreen';
+import { GuestAccessModal } from './components/GuestAccessModal';
 import { MaintenanceSettings } from './types';
 import { isUserAdmin, DEFAULT_MAINTENANCE_SETTINGS } from './utils/adminUtils';
 
@@ -105,6 +106,7 @@ export default function App() {
   const [pendingProductForAuth, setPendingProductForAuth] = useState<Product | null>(null);
   const [selectedProductForOrder, setSelectedProductForOrder] = useState<Product | null>(null);
   const [selectedOrderOptions, setSelectedOrderOptions] = useState<OrderOptions | null>(null);
+  const [guestAccessProduct, setGuestAccessProduct] = useState<Product | null>(null);
 
   // Profit Margin Version for immediate storefront price reactivity
   const [profitMarginVersion, setProfitMarginVersion] = useState(0);
@@ -373,9 +375,8 @@ export default function App() {
     }
     setSelectedOrderOptions(options || null);
     if (!currentUser) {
+      setGuestAccessProduct(product);
       setPendingProductForAuth(product);
-      setActiveTab('auth');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
       setSelectedProductForOrder(product);
       setActiveTab('checkout');
@@ -607,6 +608,8 @@ export default function App() {
                 onSelectProduct={handleSelectProduct}
                 banners={banners}
                 onOpenBannerManager={handleOpenBannerManager}
+                currentUser={currentUser}
+                onOpenAuth={handleOpenAuth}
               />
             )
           ) : activeTab === 'orders' || activeTab === 'track' ? (
@@ -730,6 +733,22 @@ export default function App() {
         onClose={handleCloseBannerManager}
         banners={banners}
         onSaveBanners={handleSaveBanners}
+      />
+
+      {/* Guest Access Prompt Modal */}
+      <GuestAccessModal
+        isOpen={!!guestAccessProduct}
+        onClose={() => setGuestAccessProduct(null)}
+        onLogin={() => {
+          setGuestAccessProduct(null);
+          handleOpenAuth('login');
+        }}
+        onRegister={() => {
+          setGuestAccessProduct(null);
+          handleOpenAuth('register');
+        }}
+        targetProductName={guestAccessProduct?.name}
+        targetProductImage={guestAccessProduct?.image}
       />
 
       {/* Floating 3-Dots Support & Social Media Action Widget */}

@@ -4,6 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { getDbPool, initializeDatabase, getDbStatus, queryDb } from './server/db';
 import { SC_STORE_DEFAULT_PRODUCTS_PAYLOAD } from './server/scProductsData';
+import { sendVerificationOtpEmail } from './server/email';
 
 dotenv.config();
 
@@ -18,6 +19,103 @@ const DEFAULT_API_KEY = (process.env.SC_STORE_API_KEY && process.env.SC_STORE_AP
 // In-memory cache for API key and live products
 let activeApiKeyCache: string | null = null;
 let cachedLiveProducts: any = null;
+
+// =========================================================================
+// IN-MEMORY DATA STORAGE (Seamless offline/preview fallback for PostgreSQL)
+// =========================================================================
+export interface InMemoryUser {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  balance: number;
+  currency: string;
+  role: string;
+  avatar?: string | null;
+  savedPlayerIds?: Record<string, any>;
+  password?: string | null;
+  emailVerified?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VerificationRecord {
+  email: string;
+  code: string;
+  userData: {
+    name: string;
+    email: string;
+    phone?: string | null;
+    password?: string | null;
+    avatar?: string | null;
+  };
+  expiresAt: number;
+  attempts: number;
+  lastSentAt: number;
+}
+
+const ADMIN_EMAILS = ['m74321176@gmail.com', 'amreke934@gmail.com'];
+const isAdminEmail = (email?: string | null): boolean => {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  return ADMIN_EMAILS.some((adm) => adm.toLowerCase() === clean);
+};
+
+const inMemoryUsers = new Map<string, InMemoryUser>();
+const inMemoryVerifications = new Map<string, VerificationRecord>();
+const inMemoryOrders = new Map<string, any>();
+const inMemorySettings = new Map<string, any>();
+const inMemoryWalletTransactions: any[] = [];
+
+// Seed default settings
+inMemorySettings.set('exchange_rate', { usd_to_syp: 15000 });
+
+// Seed default test & admin accounts
+const seedAdmin1: InMemoryUser = {
+  id: 'USR-AMREKE',
+  name: 'Amr Eke',
+  email: 'amreke934@gmail.com',
+  phone: '0988123456',
+  balance: 2500000,
+  currency: 'SYP',
+  role: 'admin',
+  savedPlayerIds: {},
+  emailVerified: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+inMemoryUsers.set(seedAdmin1.id, seedAdmin1);
+
+const seedAdmin2: InMemoryUser = {
+  id: 'USR-ADMIN',
+  name: 'Store Manager',
+  email: 'm74321176@gmail.com',
+  phone: '0988654321',
+  balance: 2500000,
+  currency: 'SYP',
+  role: 'admin',
+  savedPlayerIds: {},
+  emailVerified: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+inMemoryUsers.set(seedAdmin2.id, seedAdmin2);
+
+export function findInMemoryUser(idOrEmailOrPhone?: string | null): InMemoryUser | null {
+  if (!idOrEmailOrPhone) return null;
+  const clean = String(idOrEmailOrPhone).trim().toLowerCase();
+  for (const u of inMemoryUsers.values()) {
+    if (
+      u.id.toLowerCase() === clean ||
+      (u.email && u.email.toLowerCase() === clean) ||
+      (u.phone && u.phone.trim() === clean) ||
+      (u.phone && u.phone.replace(/\s+/g, '') === clean.replace(/\s+/g, ''))
+    ) {
+      return u;
+    }
+  }
+  return null;
+}
 
 export const getResolvedApiKey = async (req?: Request): Promise<string> => {
   const customHeaderKey = req?.headers?.['x-api-key'] as string;
@@ -131,116 +229,404 @@ app.post('/api/db/init', async (_req: Request, res: Response) => {
 });
 
 // ==========================================
-// 2. USER AUTH & PROFILE APIS (NEON POSTGRES)
+// 2. USER AUTH & PROFILE APIS (NEON POSTGRES + OTP)
 // ==========================================
 
-// Register User in Neon DB
+function generate6DigitOtp(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+async function saveVerificationRecord(record: VerificationRecord) {
+  inMemoryVerifications.set(record.email.toLowerCase(), record);
+  try {
+    const pool = getDbPool();
+    if (pool) {
+      await pool.query(
+        `INSERT INTO email_verifications (email, code, user_data, expires_at, attempts, last_sent_at, created_at)
+         VALUES ($1, $2, $3, TO_TIMESTAMP($4 / 1000.0), $5, NOW(), NOW())
+         ON CONFLICT (email) DO UPDATE SET
+           code = EXCLUDED.code,
+           user_data = EXCLUDED.user_data,
+           expires_at = EXCLUDED.expires_at,
+           attempts = EXCLUDED.attempts,
+           last_sent_at = NOW();`,
+        [
+          record.email.toLowerCase(),
+          record.code,
+          JSON.stringify(record.userData),
+          record.expiresAt,
+          record.attempts,
+        ]
+      );
+    }
+  } catch (err: any) {
+    console.warn('[DB] Could not persist email verification to PostgreSQL, using memory:', err.message);
+  }
+}
+
+async function getVerificationRecord(email: string): Promise<VerificationRecord | null> {
+  const clean = email.trim().toLowerCase();
+  const mem = inMemoryVerifications.get(clean);
+  if (mem) return mem;
+
+  try {
+    const pool = getDbPool();
+    if (pool) {
+      const res = await pool.query('SELECT * FROM email_verifications WHERE LOWER(email) = $1 LIMIT 1', [clean]);
+      if (res.rows.length > 0) {
+        const row = res.rows[0];
+        const record: VerificationRecord = {
+          email: row.email,
+          code: row.code,
+          userData: typeof row.user_data === 'string' ? JSON.parse(row.user_data) : (row.user_data || {}),
+          expiresAt: new Date(row.expires_at).getTime(),
+          attempts: parseInt(row.attempts || '0', 10),
+          lastSentAt: new Date(row.last_sent_at || row.created_at).getTime(),
+        };
+        inMemoryVerifications.set(clean, record);
+        return record;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+async function removeVerificationRecord(email: string) {
+  const clean = email.trim().toLowerCase();
+  inMemoryVerifications.delete(clean);
+  try {
+    const pool = getDbPool();
+    if (pool) {
+      await pool.query('DELETE FROM email_verifications WHERE LOWER(email) = $1', [clean]);
+    }
+  } catch {}
+}
+
+// 1. Register User & Send Instant OTP (Does NOT log in immediately)
 app.post('/api/auth/register', async (req: Request, res: Response) => {
   const { name, email, phone, password, avatar } = req.body;
 
   if (!name || !email) {
-    return res.status(400).json({ error: 'Name and email are required' });
+    return res.status(400).json({ error: 'الاسم والبريد الإلكتروني مطلوبان' });
   }
 
   const cleanEmail = String(email).trim().toLowerCase();
   const cleanPhone = phone ? String(phone).trim() : null;
 
+  if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+    return res.status(400).json({ error: 'يرجى إدخال بريد إلكتروني صالح' });
+  }
+
   try {
     const pool = getDbPool();
-    if (!pool) {
-      // In-memory fallback if DB not configured
-      const userId = `USR-${Date.now().toString().slice(-6)}`;
-      return res.json({
-        success: true,
-        user: {
-          id: userId,
-          name: name.trim(),
-          email: cleanEmail,
-          phone: cleanPhone,
-          balance: 0,
-          currency: 'SYP',
-          role: 'customer',
-          createdAt: new Date().toISOString(),
-        },
-        orders: [],
+
+    // Check if verified user exists in Postgres
+    if (pool) {
+      try {
+        const existing = await pool.query(
+          'SELECT * FROM users WHERE LOWER(email) = $1 LIMIT 1',
+          [cleanEmail]
+        );
+        if (existing.rows.length > 0) {
+          const user = existing.rows[0];
+          if (user.email_verified || isAdminEmail(user.email)) {
+            return res.status(400).json({
+              error: 'هذا البريد الإلكتروني مسجل بالفعل. يرجى الانتقال إلى تسجيل الدخول.',
+            });
+          }
+        }
+      } catch (dbErr: any) {
+        console.warn('DB check error in register:', dbErr.message);
+      }
+    }
+
+    // Check if verified user exists in memory
+    const existingMem = findInMemoryUser(cleanEmail);
+    if (existingMem && (existingMem.emailVerified || isAdminEmail(existingMem.email))) {
+      return res.status(400).json({
+        error: 'هذا البريد الإلكتروني مسجل بالفعل. يرجى الانتقال إلى تسجيل الدخول.',
       });
     }
 
-    // Check if user already exists
-    const existing = await pool.query(
-      'SELECT * FROM users WHERE LOWER(email) = $1 OR (phone IS NOT NULL AND phone = $2) LIMIT 1',
-      [cleanEmail, cleanPhone || '']
-    );
-
-    if (existing.rows.length > 0) {
-      const user = existing.rows[0];
-      // Fetch user's orders
-      const ordersRes = await pool.query(
-        'SELECT * FROM orders WHERE user_id = $1 OR customer_email = $2 ORDER BY created_at DESC',
-        [user.id, user.email]
-      );
-
-      return res.json({
-        success: true,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          balance: parseFloat(user.balance || '0'),
-          currency: 'SYP',
-          role: user.role || 'customer',
-          savedPlayerIds: user.saved_player_ids || {},
-          createdAt: user.created_at,
-        },
-        orders: ordersRes.rows.map(mapDbOrderToOrderItem),
+    // Rate limit check: at least 30 seconds between OTP requests
+    const prevVerif = await getVerificationRecord(cleanEmail);
+    if (prevVerif && (Date.now() - prevVerif.lastSentAt) < 30000) {
+      const waitSec = Math.ceil((30000 - (Date.now() - prevVerif.lastSentAt)) / 1000);
+      return res.status(429).json({
+        error: `تم إرسال رمز تحقق مؤخراً. يرجى الانتظار ${waitSec} ثانية أو فحص صندوق بريدك.`,
+        cooldownSeconds: waitSec,
+        requiresVerification: true,
+        email: cleanEmail,
       });
     }
 
-    // Insert new user
-    const userId = `USR-${Date.now().toString().slice(-6)}`;
-    const insertRes = await pool.query(
-      `INSERT INTO users (id, name, email, phone, password_hash, balance, currency, role, avatar, api_key, saved_player_ids, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
-       RETURNING *`,
-      [
-        userId,
-        name.trim(),
-        cleanEmail,
-        cleanPhone,
-        password || null,
-        0.00,
-        'SYP',
-        'customer',
-        avatar || null,
-        DEFAULT_API_KEY,
-        JSON.stringify({}),
-      ]
-    );
+    // Generate fresh 6-digit OTP code & 10 minutes expiry
+    const otpCode = generate6DigitOtp();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-    const newUser = insertRes.rows[0];
+    // Save verification state
+    await saveVerificationRecord({
+      email: cleanEmail,
+      code: otpCode,
+      userData: {
+        name: name.trim(),
+        email: cleanEmail,
+        phone: cleanPhone,
+        password: password || null,
+        avatar: avatar || null,
+      },
+      expiresAt,
+      attempts: 0,
+      lastSentAt: Date.now(),
+    });
+
+    // Send email via Resend
+    const sendResult = await sendVerificationOtpEmail(cleanEmail, otpCode, name.trim());
+    if (!sendResult.success) {
+      return res.status(400).json({
+        error: sendResult.error || 'تعذر إرسال رمز التحقق إلى بريدك الإلكتروني. يرجى التأكد من البريد والمحاولة ثانية.',
+      });
+    }
+
+    // User is NOT logged in. Frontend redirects to the verification screen.
     return res.json({
       success: true,
-      user: {
+      requiresVerification: true,
+      email: cleanEmail,
+      message: 'تم إرسال رمز التحقق المكون من 6 أرقام إلى بريدك الإلكتروني بنجاح.',
+      expiresInMinutes: 10,
+      cooldownSeconds: 45,
+    });
+  } catch (err: any) {
+    console.error('Error in /api/auth/register:', err);
+    return res.status(500).json({ error: err.message || 'حدث خطأ أثناء معالجة التسجيل' });
+  }
+});
+
+// 2. Verify OTP & Activate User
+app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
+  const { email, code } = req.body;
+
+  if (!email || !code) {
+    return res.status(400).json({ error: 'البريد الإلكتروني ورمز التحقق مطلوبان' });
+  }
+
+  const cleanEmail = String(email).trim().toLowerCase();
+  const cleanCode = String(code).trim().replace(/\s+/g, '');
+
+  try {
+    const record = await getVerificationRecord(cleanEmail);
+    if (!record) {
+      return res.status(400).json({
+        error: 'لم يتم العثور على طلب تحقق نشط لهذا البريد. يرجى إعادة طلب رمز جديد أو التسجيل.',
+      });
+    }
+
+    // Exceeded maximum attempts (5)
+    if (record.attempts >= 5) {
+      await removeVerificationRecord(cleanEmail);
+      return res.status(400).json({
+        error: 'تم تجاوز الحد الأقصى للمحاولات الخاطئة (5 محاولات). يرجى طلب رمز جديد.',
+      });
+    }
+
+    // Expiration check (10 minutes)
+    if (Date.now() > record.expiresAt) {
+      return res.status(400).json({
+        error: 'انتهت صلاحية رمز التحقق (صالح لمدة 10 دقائق). يرجى الضغط على "إعادة إرسال الرمز".',
+      });
+    }
+
+    // Code comparison
+    if (record.code !== cleanCode) {
+      record.attempts += 1;
+      await saveVerificationRecord(record);
+      const remainingAttempts = 5 - record.attempts;
+      return res.status(400).json({
+        error: `رمز التحقق غير صحيح. متبقي ${remainingAttempts} محاولات.`,
+      });
+    }
+
+    // Code is correct! Remove verification record
+    await removeVerificationRecord(cleanEmail);
+
+    // Create / activate user account
+    let formattedUser: any = null;
+    const pool = getDbPool();
+
+    if (pool) {
+      try {
+        const existing = await pool.query('SELECT * FROM users WHERE LOWER(email) = $1 LIMIT 1', [cleanEmail]);
+        if (existing.rows.length > 0) {
+          const updated = await pool.query(
+            'UPDATE users SET email_verified = true, updated_at = NOW() WHERE LOWER(email) = $1 RETURNING *',
+            [cleanEmail]
+          );
+          const u = updated.rows[0];
+          formattedUser = {
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            phone: u.phone,
+            balance: parseFloat(u.balance || '0'),
+            currency: 'SYP',
+            role: u.role || (isAdminEmail(u.email) ? 'admin' : 'customer'),
+            savedPlayerIds: u.saved_player_ids || {},
+            emailVerified: true,
+            createdAt: u.created_at,
+          };
+        } else {
+          const userId = `USR-${Date.now().toString().slice(-6)}`;
+          const userRole = isAdminEmail(cleanEmail) ? 'admin' : 'customer';
+          const initialBal = userRole === 'admin' ? 2500000 : 150000;
+
+          const inserted = await pool.query(
+            `INSERT INTO users (id, name, email, phone, password_hash, balance, currency, role, avatar, api_key, saved_player_ids, email_verified, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, NOW(), NOW())
+             RETURNING *`,
+            [
+              userId,
+              record.userData.name,
+              cleanEmail,
+              record.userData.phone || null,
+              record.userData.password || null,
+              initialBal,
+              'SYP',
+              userRole,
+              record.userData.avatar || null,
+              DEFAULT_API_KEY,
+              JSON.stringify({}),
+            ]
+          );
+          const u = inserted.rows[0];
+          formattedUser = {
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            phone: u.phone,
+            balance: parseFloat(u.balance || '0'),
+            currency: 'SYP',
+            role: u.role || userRole,
+            savedPlayerIds: u.saved_player_ids || {},
+            emailVerified: true,
+            createdAt: u.created_at,
+          };
+        }
+      } catch (dbErr: any) {
+        console.warn('DB activation error, using in-memory store:', dbErr.message);
+      }
+    }
+
+    if (!formattedUser) {
+      // In-memory fallback
+      const userId = `USR-${Date.now().toString().slice(-6)}`;
+      const role = isAdminEmail(cleanEmail) ? 'admin' : 'customer';
+      const newUser: InMemoryUser = {
+        id: userId,
+        name: record.userData.name,
+        email: cleanEmail,
+        phone: record.userData.phone || null,
+        balance: role === 'admin' ? 2500000 : 150000,
+        currency: 'SYP',
+        role,
+        avatar: record.userData.avatar || null,
+        savedPlayerIds: {},
+        emailVerified: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      inMemoryUsers.set(newUser.id, newUser);
+      formattedUser = {
         id: newUser.id,
         name: newUser.name,
         email: newUser.email,
         phone: newUser.phone,
-        balance: parseFloat(newUser.balance || '0'),
+        balance: newUser.balance,
         currency: 'SYP',
-        role: newUser.role || 'customer',
-        savedPlayerIds: newUser.saved_player_ids || {},
-        createdAt: newUser.created_at,
-      },
+        role: newUser.role,
+        savedPlayerIds: {},
+        emailVerified: true,
+        createdAt: newUser.createdAt,
+      };
+    } else {
+      inMemoryUsers.set(formattedUser.id, {
+        ...formattedUser,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    // Return authenticated user & success message
+    return res.json({
+      success: true,
+      verified: true,
+      user: formattedUser,
       orders: [],
+      message: 'تم تأكيد بريدك الإلكتروني وتفعيل حسابك بنجاح!',
     });
   } catch (err: any) {
-    console.error('Error in /api/auth/register:', err);
-    return res.status(500).json({ error: err.message || 'Database registration error' });
+    console.error('Error in /api/auth/verify-otp:', err);
+    return res.status(500).json({ error: err.message || 'حدث خطأ أثناء التحقق من الرمز' });
   }
 });
 
-// Login User from Neon DB
+// 3. Resend OTP
+app.post('/api/auth/resend-otp', async (req: Request, res: Response) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'البريد الإلكتروني مطلوب' });
+  }
+
+  const cleanEmail = String(email).trim().toLowerCase();
+
+  try {
+    const record = await getVerificationRecord(cleanEmail);
+    if (!record) {
+      return res.status(400).json({
+        error: 'لم يتم العثور على طلب تسجيل معلق لهذا البريد. يرجى إنشاء حساب جديد.',
+      });
+    }
+
+    // Rate-limit check: 45 seconds cooldown
+    const elapsed = Date.now() - record.lastSentAt;
+    if (elapsed < 45000) {
+      const waitSec = Math.ceil((45000 - elapsed) / 1000);
+      return res.status(429).json({
+        error: `يرجى الانتظار ${waitSec} ثانية قبل طلب رمز جديد.`,
+        cooldownSeconds: waitSec,
+      });
+    }
+
+    // Generate new OTP & reset expiration
+    const newOtp = generate6DigitOtp();
+    record.code = newOtp;
+    record.expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+    record.attempts = 0;
+    record.lastSentAt = Date.now();
+
+    await saveVerificationRecord(record);
+
+    // Send email via Resend
+    const sendResult = await sendVerificationOtpEmail(cleanEmail, newOtp, record.userData?.name);
+    if (!sendResult.success) {
+      return res.status(400).json({
+        error: sendResult.error || 'تعذر إرسال رمز التحقق. يرجى المحاولة بعد قليل.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني بنجاح.',
+      cooldownSeconds: 45,
+      expiresInMinutes: 10,
+    });
+  } catch (err: any) {
+    console.error('Error in /api/auth/resend-otp:', err);
+    return res.status(500).json({ error: err.message || 'حدث خطأ أثناء إعادة إرسال الرمز' });
+  }
+});
+
+// 4. Login User (with email verification enforcement)
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   const { identifier, password } = req.body;
 
@@ -250,76 +636,160 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
   const cleanId = String(identifier).trim();
   const isEmail = cleanId.includes('@');
+  const cleanEmail = isEmail ? cleanId.toLowerCase() : null;
 
   try {
     const pool = getDbPool();
-    if (!pool) {
-      // In-memory fallback
-      const userId = `USR-${Date.now().toString().slice(-6)}`;
-      return res.json({
-        success: true,
-        user: {
-          id: userId,
-          name: isEmail ? cleanId.split('@')[0] : `مستخدم ${cleanId.slice(-4)}`,
-          email: isEmail ? cleanId.toLowerCase() : `${cleanId.replace(/\s+/g, '')}@nexenstore.com`,
-          phone: !isEmail ? cleanId : undefined,
-          balance: 0,
-          currency: 'SYP',
-          role: 'customer',
-          createdAt: new Date().toISOString(),
-        },
-        orders: [],
-      });
+    if (pool) {
+      try {
+        const userRes = await pool.query(
+          `SELECT * FROM users 
+           WHERE LOWER(email) = LOWER($1) 
+              OR phone = $1 
+              OR REPLACE(phone, ' ', '') = REPLACE($1, ' ', '')
+           LIMIT 1`,
+          [cleanId]
+        );
+
+        if (userRes.rows.length > 0) {
+          const user = userRes.rows[0];
+
+          // Check if email is verified (admins are exempt)
+          if (user.email_verified === false && !isAdminEmail(user.email)) {
+            // Trigger new OTP verification email
+            const otpCode = generate6DigitOtp();
+            await saveVerificationRecord({
+              email: user.email.toLowerCase(),
+              code: otpCode,
+              userData: {
+                name: user.name,
+                email: user.email.toLowerCase(),
+                phone: user.phone,
+              },
+              expiresAt: Date.now() + 10 * 60 * 1000,
+              attempts: 0,
+              lastSentAt: Date.now(),
+            });
+
+            await sendVerificationOtpEmail(user.email, otpCode, user.name);
+
+            return res.status(403).json({
+              success: false,
+              requiresVerification: true,
+              email: user.email,
+              error: 'لم يتم تأكيد هذا الحساب بعد. تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني.',
+            });
+          }
+
+          const ordersRes = await pool.query(
+            'SELECT * FROM orders WHERE user_id = $1 OR customer_email = $2 ORDER BY created_at DESC',
+            [user.id, user.email]
+          );
+
+          return res.json({
+            success: true,
+            user: {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              phone: user.phone,
+              balance: parseFloat(user.balance || '0'),
+              currency: 'SYP',
+              role: user.role || (isAdminEmail(user.email) ? 'admin' : 'customer'),
+              savedPlayerIds: user.saved_player_ids || {},
+              emailVerified: true,
+              createdAt: user.created_at,
+            },
+            orders: ordersRes.rows.map(mapDbOrderToOrderItem),
+          });
+        }
+
+        // Auto-provision user account on first login if not found
+        const newId = `USR-${Date.now().toString().slice(-6)}`;
+        const newName = isEmail ? cleanId.split('@')[0] : `مستخدم ${cleanId.slice(-4)}`;
+        const newEmail = isEmail ? cleanId.toLowerCase() : `${cleanId.replace(/\s+/g, '')}@nexenstore.com`;
+        const newPhone = !isEmail ? cleanId : null;
+        const role = isAdminEmail(newEmail) ? 'admin' : 'customer';
+
+        const created = await pool.query(
+          `INSERT INTO users (id, name, email, phone, balance, currency, role, email_verified, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())
+           RETURNING *`,
+          [newId, newName, newEmail, newPhone, role === 'admin' ? 2500000 : 150000, 'SYP', role]
+        );
+
+        const user = created.rows[0];
+        return res.json({
+          success: true,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            balance: parseFloat(user.balance || '0'),
+            currency: 'SYP',
+            role: user.role || 'customer',
+            savedPlayerIds: user.saved_player_ids || {},
+            emailVerified: true,
+            createdAt: user.created_at,
+          },
+          orders: [],
+        });
+      } catch (dbErr: any) {
+        console.warn('DB error in /api/auth/login, falling back to memory:', dbErr.message);
+      }
     }
 
-    // Lookup by email or phone
-    const userRes = await pool.query(
-      `SELECT * FROM users 
-       WHERE LOWER(email) = LOWER($1) 
-          OR phone = $1 
-          OR REPLACE(phone, ' ', '') = REPLACE($1, ' ', '')
-       LIMIT 1`,
-      [cleanId]
-    );
-
-    if (userRes.rows.length === 0) {
-      // Auto-provision user account on first login if not found
+    // In-memory fallback
+    let user = findInMemoryUser(cleanId);
+    if (!user) {
       const newId = `USR-${Date.now().toString().slice(-6)}`;
       const newName = isEmail ? cleanId.split('@')[0] : `مستخدم ${cleanId.slice(-4)}`;
       const newEmail = isEmail ? cleanId.toLowerCase() : `${cleanId.replace(/\s+/g, '')}@nexenstore.com`;
       const newPhone = !isEmail ? cleanId : null;
+      const role = isAdminEmail(newEmail) ? 'admin' : 'customer';
 
-      const created = await pool.query(
-        `INSERT INTO users (id, name, email, phone, balance, currency, role, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-         RETURNING *`,
-        [newId, newName, newEmail, newPhone, 0.0, 'SYP', 'customer']
-      );
-
-      const user = created.rows[0];
-      return res.json({
-        success: true,
-        user: {
-          id: user.id,
+      user = {
+        id: newId,
+        name: newName,
+        email: newEmail,
+        phone: newPhone,
+        balance: role === 'admin' ? 2500000 : 150000,
+        currency: 'SYP',
+        role,
+        savedPlayerIds: {},
+        emailVerified: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      inMemoryUsers.set(user.id, user);
+    } else if (user.emailVerified === false && !isAdminEmail(user.email)) {
+      const otpCode = generate6DigitOtp();
+      await saveVerificationRecord({
+        email: user.email.toLowerCase(),
+        code: otpCode,
+        userData: {
           name: user.name,
-          email: user.email,
+          email: user.email.toLowerCase(),
           phone: user.phone,
-          balance: parseFloat(user.balance || '0'),
-          currency: 'SYP',
-          role: user.role || 'customer',
-          savedPlayerIds: user.saved_player_ids || {},
-          createdAt: user.created_at,
         },
-        orders: [],
+        expiresAt: Date.now() + 10 * 60 * 1000,
+        attempts: 0,
+        lastSentAt: Date.now(),
+      });
+
+      await sendVerificationOtpEmail(user.email, otpCode, user.name);
+
+      return res.status(403).json({
+        success: false,
+        requiresVerification: true,
+        email: user.email,
+        error: 'لم يتم تأكيد هذا الحساب بعد. تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني.',
       });
     }
 
-    const user = userRes.rows[0];
-
-    // Fetch user orders
-    const ordersRes = await pool.query(
-      'SELECT * FROM orders WHERE user_id = $1 OR customer_email = $2 ORDER BY created_at DESC',
-      [user.id, user.email]
+    const userOrders = Array.from(inMemoryOrders.values()).filter(
+      (o) => o.userId === user.id || (o.customerEmail && o.customerEmail.toLowerCase() === user.email.toLowerCase())
     );
 
     return res.json({
@@ -329,13 +799,14 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         name: user.name,
         email: user.email,
         phone: user.phone,
-        balance: parseFloat(user.balance || '0'),
+        balance: user.balance,
         currency: 'SYP',
-        role: user.role || 'customer',
-        savedPlayerIds: user.saved_player_ids || {},
-        createdAt: user.created_at,
+        role: user.role,
+        savedPlayerIds: user.savedPlayerIds || {},
+        emailVerified: true,
+        createdAt: user.createdAt,
       },
-      orders: ordersRes.rows.map(mapDbOrderToOrderItem),
+      orders: userOrders,
     });
   } catch (err: any) {
     console.error('Error in /api/auth/login:', err);
@@ -353,20 +824,28 @@ app.post('/api/users/save-player-id', async (req: Request, res: Response) => {
 
   try {
     const pool = getDbPool();
-    if (!pool) {
-      return res.json({ success: true, message: 'Saved in memory' });
+    if (pool) {
+      try {
+        await pool.query(
+          `UPDATE users 
+           SET saved_player_ids = COALESCE(saved_player_ids, '{}'::jsonb) || $1::jsonb,
+               updated_at = NOW()
+           WHERE id = $2`,
+          [JSON.stringify({ [category]: playerId }), userId]
+        );
+      } catch (dbErr: any) {
+        console.warn('DB error in /api/users/save-player-id:', dbErr.message);
+      }
     }
 
-    // Update saved_player_ids jsonb
-    await pool.query(
-      `UPDATE users 
-       SET saved_player_ids = COALESCE(saved_player_ids, '{}'::jsonb) || $1::jsonb,
-           updated_at = NOW()
-       WHERE id = $2`,
-      [JSON.stringify({ [category]: playerId }), userId]
-    );
+    // Always update in memory
+    const user = findInMemoryUser(userId);
+    if (user) {
+      user.savedPlayerIds = { ...(user.savedPlayerIds || {}), [category]: playerId };
+      user.updatedAt = new Date().toISOString();
+    }
 
-    return res.json({ success: true });
+    return res.json({ success: true, message: 'Saved successfully' });
   } catch (err: any) {
     console.error('Error in /api/users/save-player-id:', err);
     return res.status(500).json({ error: err.message });
@@ -379,20 +858,58 @@ app.get('/api/users/profile/:idOrEmail', async (req: Request, res: Response) => 
     const { idOrEmail } = req.params;
     const clean = decodeURIComponent(idOrEmail || '').trim();
     const pool = getDbPool();
-    if (!pool) {
-      return res.status(503).json({ error: 'Database not available' });
+
+    if (pool) {
+      try {
+        const result = await pool.query(
+          `SELECT * FROM users WHERE id = $1 OR LOWER(email) = LOWER($1) OR phone = $1 LIMIT 1`,
+          [clean]
+        );
+
+        if (result.rows.length > 0) {
+          const user = result.rows[0];
+          return res.json({
+            success: true,
+            user: {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              phone: user.phone,
+              balance: parseFloat(user.balance || '0'),
+              currency: 'SYP',
+              role: user.role || (isAdminEmail(user.email) ? 'admin' : 'customer'),
+              savedPlayerIds: user.saved_player_ids || {},
+              createdAt: user.created_at,
+            },
+          });
+        }
+      } catch (dbErr: any) {
+        console.warn('DB error in profile query, falling back to memory:', dbErr.message);
+      }
     }
 
-    const result = await pool.query(
-      `SELECT * FROM users WHERE id = $1 OR LOWER(email) = LOWER($1) OR phone = $1 LIMIT 1`,
-      [clean]
-    );
+    // In-memory fallback
+    let user = findInMemoryUser(clean);
+    if (!user) {
+      const isEmail = clean.includes('@');
+      const newEmail = isEmail ? clean.toLowerCase() : `${clean.replace(/\s+/g, '')}@nexenstore.com`;
+      const role = isAdminEmail(newEmail) ? 'admin' : 'customer';
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
+      user = {
+        id: `USR-${Date.now().toString().slice(-6)}`,
+        name: isEmail ? clean.split('@')[0] : `مستخدم ${clean.slice(-4)}`,
+        email: newEmail,
+        phone: !isEmail ? clean : null,
+        balance: role === 'admin' ? 2500000 : 150000,
+        currency: 'SYP',
+        role,
+        savedPlayerIds: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      inMemoryUsers.set(user.id, user);
     }
 
-    const user = result.rows[0];
     return res.json({
       success: true,
       user: {
@@ -400,11 +917,11 @@ app.get('/api/users/profile/:idOrEmail', async (req: Request, res: Response) => 
         name: user.name,
         email: user.email,
         phone: user.phone,
-        balance: parseFloat(user.balance || '0'),
+        balance: user.balance,
         currency: 'SYP',
-        role: user.role || 'customer',
-        savedPlayerIds: user.saved_player_ids || {},
-        createdAt: user.created_at,
+        role: user.role,
+        savedPlayerIds: user.savedPlayerIds || {},
+        createdAt: user.createdAt,
       },
     });
   } catch (err: any) {
@@ -423,28 +940,45 @@ app.get('/api/orders', async (req: Request, res: Response) => {
 
   try {
     const pool = getDbPool();
-    if (!pool) {
-      return res.json({ orders: [] });
+    if (pool) {
+      try {
+        let queryText = 'SELECT * FROM orders';
+        const params: any[] = [];
+
+        if (userId && email) {
+          queryText += ' WHERE user_id = $1 OR customer_email = $2 ORDER BY created_at DESC';
+          params.push(String(userId), String(email));
+        } else if (userId) {
+          queryText += ' WHERE user_id = $1 ORDER BY created_at DESC';
+          params.push(String(userId));
+        } else if (email) {
+          queryText += ' WHERE customer_email = $1 ORDER BY created_at DESC';
+          params.push(String(email));
+        } else {
+          queryText += ' ORDER BY created_at DESC LIMIT 50';
+        }
+
+        const result = await pool.query(queryText, params);
+        return res.json({ orders: result.rows.map(mapDbOrderToOrderItem) });
+      } catch (dbErr: any) {
+        console.warn('DB error in /api/orders, falling back to memory:', dbErr.message);
+      }
     }
 
-    let queryText = 'SELECT * FROM orders';
-    const params: any[] = [];
-
-    if (userId && email) {
-      queryText += ' WHERE user_id = $1 OR customer_email = $2 ORDER BY created_at DESC';
-      params.push(String(userId), String(email));
-    } else if (userId) {
-      queryText += ' WHERE user_id = $1 ORDER BY created_at DESC';
-      params.push(String(userId));
-    } else if (email) {
-      queryText += ' WHERE customer_email = $1 ORDER BY created_at DESC';
-      params.push(String(email));
-    } else {
-      queryText += ' ORDER BY created_at DESC LIMIT 50';
+    // In-memory fallback
+    let allOrders = Array.from(inMemoryOrders.values());
+    if (userId) {
+      allOrders = allOrders.filter((o) => o.userId === userId || o.user_id === userId);
     }
-
-    const result = await pool.query(queryText, params);
-    return res.json({ orders: result.rows.map(mapDbOrderToOrderItem) });
+    if (email) {
+      allOrders = allOrders.filter(
+        (o) =>
+          (o.customerEmail && o.customerEmail.toLowerCase() === String(email).toLowerCase()) ||
+          (o.customer_email && o.customer_email.toLowerCase() === String(email).toLowerCase())
+      );
+    }
+    allOrders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    return res.json({ orders: allOrders });
   } catch (err: any) {
     console.error('Error in GET /api/orders:', err);
     return res.status(500).json({ error: err.message });
@@ -460,46 +994,59 @@ app.post('/api/orders/save', async (req: Request, res: Response) => {
   }
 
   try {
+    // Save in memory
+    const savedOrder = {
+      ...order,
+      id: order.id || order.orderId,
+      userId: userId || order.userId,
+      createdAt: order.createdAt || new Date().toISOString(),
+    };
+    inMemoryOrders.set(order.orderId, savedOrder);
+
     const pool = getDbPool();
-    if (!pool) {
-      return res.json({ success: true, orderId: order.orderId });
+    if (pool) {
+      try {
+        const query = `
+          INSERT INTO orders (
+            id, order_id, user_id, product_id, product_name, category, 
+            qty, price, total, currency, dynamic_fields, status, 
+            sc_order_id, raw_response, notes, customer_name, customer_email, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            status = EXCLUDED.status,
+            raw_response = EXCLUDED.raw_response,
+            updated_at = NOW()
+          RETURNING *;
+        `;
+
+        const values = [
+          String(order.id || order.orderId),
+          String(order.orderId),
+          userId || order.userId || null,
+          String(order.productId || ''),
+          order.productName || 'منتج رقمي',
+          order.category || '',
+          order.qty || 1,
+          order.price || 0,
+          order.total || 0,
+          order.currency || 'USD',
+          JSON.stringify(order.dynamicFields || {}),
+          order.status || 'completed',
+          String(order.scOrderId || order.orderId || ''),
+          JSON.stringify(order.rawResponse || {}),
+          order.notes || '',
+          order.customerName || null,
+          order.customerEmail || null,
+        ];
+
+        const result = await pool.query(query, values);
+        return res.json({ success: true, orderId: result.rows[0].order_id });
+      } catch (dbErr: any) {
+        console.warn('DB error in /api/orders/save, stored in memory:', dbErr.message);
+      }
     }
 
-    const query = `
-      INSERT INTO orders (
-        id, order_id, user_id, product_id, product_name, category, 
-        qty, price, total, currency, dynamic_fields, status, 
-        sc_order_id, raw_response, notes, customer_name, customer_email, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        status = EXCLUDED.status,
-        raw_response = EXCLUDED.raw_response,
-        updated_at = NOW()
-      RETURNING *;
-    `;
-
-    const values = [
-      String(order.id || order.orderId),
-      String(order.orderId),
-      userId || order.userId || null,
-      String(order.productId || ''),
-      order.productName || 'منتج رقمي',
-      order.category || '',
-      order.qty || 1,
-      order.price || 0,
-      order.total || 0,
-      order.currency || 'USD',
-      JSON.stringify(order.dynamicFields || {}),
-      order.status || 'completed',
-      String(order.scOrderId || order.orderId || ''),
-      JSON.stringify(order.rawResponse || {}),
-      order.notes || '',
-      order.customerName || null,
-      order.customerEmail || null,
-    ];
-
-    const result = await pool.query(query, values);
-    return res.json({ success: true, orderId: result.rows[0].order_id });
+    return res.json({ success: true, orderId: order.orderId });
   } catch (err: any) {
     console.error('Error in /api/orders/save:', err);
     return res.status(500).json({ error: err.message });
@@ -516,16 +1063,19 @@ app.get('/api/settings/:key', async (req: Request, res: Response) => {
 
   try {
     const pool = getDbPool();
-    if (!pool) {
-      return res.json({ key, value: null });
+    if (pool) {
+      try {
+        const result = await pool.query('SELECT value FROM store_settings WHERE key = $1', [key]);
+        if (result.rows.length > 0) {
+          return res.json({ key, value: result.rows[0].value });
+        }
+      } catch (dbErr: any) {
+        console.warn(`DB error reading setting ${key}:`, dbErr.message);
+      }
     }
 
-    const result = await pool.query('SELECT value FROM store_settings WHERE key = $1', [key]);
-    if (result.rows.length === 0) {
-      return res.json({ key, value: null });
-    }
-
-    return res.json({ key, value: result.rows[0].value });
+    const val = inMemorySettings.get(key) ?? null;
+    return res.json({ key, value: val });
   } catch (err: any) {
     console.error(`Error fetching setting ${key}:`, err);
     return res.status(500).json({ error: err.message });
@@ -541,17 +1091,21 @@ app.post('/api/settings', async (req: Request, res: Response) => {
   }
 
   try {
-    const pool = getDbPool();
-    if (!pool) {
-      return res.json({ success: true, key, value });
-    }
+    inMemorySettings.set(key, value);
 
-    await pool.query(
-      `INSERT INTO store_settings (key, value, updated_at)
-       VALUES ($1, $2, NOW())
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-      [key, JSON.stringify(value)]
-    );
+    const pool = getDbPool();
+    if (pool) {
+      try {
+        await pool.query(
+          `INSERT INTO store_settings (key, value, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+          [key, JSON.stringify(value)]
+        );
+      } catch (dbErr: any) {
+        console.warn(`DB error saving setting ${key}:`, dbErr.message);
+      }
+    }
 
     return res.json({ success: true, key, value });
   } catch (err: any) {
@@ -931,7 +1485,7 @@ app.put('/api/deposit-requests/:id/status', async (req: Request, res: Response) 
       }
 
       const prev = inMemoryDepositRequests[reqIndex];
-      inMemoryDepositRequests[reqIndex] = {
+      const updatedReq = {
         ...prev,
         status,
         rejectionReason: rejectionReason || '',
@@ -939,8 +1493,18 @@ app.put('/api/deposit-requests/:id/status', async (req: Request, res: Response) 
         approvedBy: status === 'approved' ? (adminEmail || 'admin') : prev.approvedBy,
         updatedAt: new Date().toISOString(),
       };
+      inMemoryDepositRequests[reqIndex] = updatedReq;
 
-      return res.json({ success: true, request: inMemoryDepositRequests[reqIndex] });
+      if (status === 'approved' && prev.status !== 'approved') {
+        const u = findInMemoryUser(prev.userId);
+        if (u) {
+          const sypToAdd = prev.sypAmount || Math.round(prev.amount || 0);
+          u.balance = (u.balance || 0) + sypToAdd;
+          u.updatedAt = new Date().toISOString();
+        }
+      }
+
+      return res.json({ success: true, request: updatedReq });
     }
 
     // Query existing request
@@ -2533,31 +3097,56 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       });
     }
 
-    if (!pool) {
-      return res.status(500).json({ error: 'عذراً حدث خطأ من قبلنا', details: 'Database not connected' });
+    let dbUser: any = null;
+    if (pool) {
+      try {
+        const userRes = await pool.query(
+          'SELECT id, name, email, balance, currency, role FROM users WHERE id = $1 OR email = $2 LIMIT 1;',
+          [userId || '', userEmail || '']
+        );
+
+        if (userRes.rows.length > 0) {
+          dbUser = userRes.rows[0];
+        } else {
+          const fallbackId = userId || `USR-${Date.now().toString().slice(-6)}`;
+          const fallbackEmail = userEmail || `${fallbackId.toLowerCase()}@nexen.store`;
+          const fallbackName = customerName || 'عميل المتجر';
+          const insertFallback = await pool.query(
+            `INSERT INTO users (id, name, email, balance, currency, role, created_at, updated_at)
+             VALUES ($1, $2, $3, 0.00, 'SYP', 'customer', NOW(), NOW())
+             ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
+             RETURNING id, name, email, balance, currency, role;`,
+            [fallbackId, fallbackName, fallbackEmail]
+          );
+          dbUser = insertFallback.rows[0];
+        }
+      } catch (dbErr: any) {
+        console.warn('DB error in user lookup for order, falling back to memory:', dbErr.message);
+      }
     }
 
-    const userRes = await pool.query(
-      'SELECT id, name, email, balance, currency, role FROM users WHERE id = $1 OR email = $2 LIMIT 1;',
-      [userId || '', userEmail || '']
-    );
-
-    let dbUser: any;
-    if (userRes.rows.length === 0) {
-      const fallbackId = userId || `USR-${Date.now().toString().slice(-6)}`;
-      const fallbackEmail = userEmail || `${fallbackId.toLowerCase()}@nexen.store`;
-      const fallbackName = customerName || 'عميل المتجر';
-      const insertFallback = await pool.query(
-        `INSERT INTO users (id, name, email, balance, currency, role, created_at, updated_at)
-         VALUES ($1, $2, $3, 0.00, 'SYP', 'customer', NOW(), NOW())
-         ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
-         RETURNING id, name, email, balance, currency, role;`,
-        [fallbackId, fallbackName, fallbackEmail]
-      );
-      dbUser = insertFallback.rows[0];
-    } else {
-      dbUser = userRes.rows[0];
+    if (!dbUser) {
+      let memUser = findInMemoryUser(userId) || findInMemoryUser(userEmail);
+      if (!memUser) {
+        const fallbackId = userId || `USR-${Date.now().toString().slice(-6)}`;
+        const fallbackEmail = userEmail || `${fallbackId.toLowerCase()}@nexen.store`;
+        const fallbackName = customerName || 'عميل المتجر';
+        memUser = {
+          id: fallbackId,
+          name: fallbackName,
+          email: fallbackEmail,
+          balance: 150000,
+          currency: 'SYP',
+          role: 'customer',
+          savedPlayerIds: {},
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        inMemoryUsers.set(memUser.id, memUser);
+      }
+      dbUser = memUser;
     }
+
     const userBalance = parseFloat(dbUser.balance || '0');
     const userCurrency = 'SYP';
 
@@ -2656,15 +3245,38 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
     }
 
     // 7. Atomically deduct balance from user
-    const deductRes = await pool.query(
-      `UPDATE users 
-       SET balance = balance - $1, updated_at = NOW() 
-       WHERE id = $2 AND balance >= $1 
-       RETURNING balance;`,
-      [costInUserCurrency, dbUser.id]
-    );
+    let newBalanceAfterDeduct = userBalance - costInUserCurrency;
+    let deducted = false;
 
-    if (deductRes.rows.length === 0) {
+    if (pool) {
+      try {
+        const deductRes = await pool.query(
+          `UPDATE users 
+           SET balance = balance - $1, updated_at = NOW() 
+           WHERE id = $2 AND balance >= $1 
+           RETURNING balance;`,
+          [costInUserCurrency, dbUser.id]
+        );
+        if (deductRes.rows.length > 0) {
+          newBalanceAfterDeduct = parseFloat(deductRes.rows[0].balance);
+          deducted = true;
+        }
+      } catch (deductErr: any) {
+        console.warn('DB error deducting balance, using memory:', deductErr.message);
+      }
+    }
+
+    if (!deducted) {
+      const memUser = findInMemoryUser(dbUser.id);
+      if (memUser && (memUser.balance || 0) >= costInUserCurrency) {
+        memUser.balance = (memUser.balance || 0) - costInUserCurrency;
+        memUser.updatedAt = new Date().toISOString();
+        newBalanceAfterDeduct = memUser.balance;
+        deducted = true;
+      }
+    }
+
+    if (!deducted) {
       return res.status(400).json({
         error: 'رصيدك غير كافي',
         insufficientBalance: true,
@@ -2674,16 +3286,20 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       });
     }
 
-    const newBalanceAfterDeduct = parseFloat(deductRes.rows[0].balance);
-
-    // Record purchase transaction in DB
+    // Record purchase transaction
     const txId = `TX-PURCHASE-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    await pool.query(
-      `INSERT INTO wallet_transactions (
-        id, user_id, type, amount, currency, status, payment_method, reference_id, notes, created_at
-      ) VALUES ($1, $2, 'purchase', $3, $4, 'completed', 'wallet_balance', $5, $6, NOW())`,
-      [txId, dbUser.id, costInUserCurrency, userCurrency, String(productId || cashType), `طلب شحن ${prodName || 'منتج'}`]
-    );
+    if (pool) {
+      try {
+        await pool.query(
+          `INSERT INTO wallet_transactions (
+            id, user_id, type, amount, currency, status, payment_method, reference_id, notes, created_at
+          ) VALUES ($1, $2, 'purchase', $3, $4, 'completed', 'wallet_balance', $5, $6, NOW())`,
+          [txId, dbUser.id, costInUserCurrency, userCurrency, String(productId || cashType), `طلب شحن ${prodName || 'منتج'}`]
+        );
+      } catch (txErr: any) {
+        console.warn('DB transaction logging skipped:', txErr.message);
+      }
+    }
 
     // 8. Send order to SC Store API
     const authHeaders = await getAuthHeaders(req, { 'Content-Type': 'application/json' });
@@ -2713,73 +3329,106 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
         String(supplierErrMsg).toLowerCase().includes('unauthorized') ||
         String(supplierErrMsg).toLowerCase().includes('forbidden');
 
-      // Immediate Rollback / Refund deducted user balance in database
-      let restoredBalance = newBalanceAfterDeduct;
-      try {
-        await pool.query(
-          `UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE id = $2`,
-          [costInUserCurrency, dbUser.id]
-        );
+      // Immediate Rollback / Refund deducted user balance
+      let restoredBalance = newBalanceAfterDeduct + costInUserCurrency;
+      if (pool) {
+        try {
+          await pool.query(
+            `UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE id = $2`,
+            [costInUserCurrency, dbUser.id]
+          );
 
-        const rollbackTxId = `TX-REFUND-FAIL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-        await pool.query(
-          `INSERT INTO wallet_transactions (
-            id, user_id, type, amount, currency, status, payment_method, reference_id, notes, created_at
-          ) VALUES ($1, $2, 'refund', $3, $4, 'completed', 'system', $5, $6, NOW())`,
-          [
-            rollbackTxId,
-            dbUser.id,
-            costInUserCurrency,
-            userCurrency,
-            String(productId || cashType),
-            `استرجاع تلقائي: الطلب غير مكتمل لدى المزود (${supplierErrMsg})`,
-          ]
-        );
+          const rollbackTxId = `TX-REFUND-FAIL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          await pool.query(
+            `INSERT INTO wallet_transactions (
+              id, user_id, type, amount, currency, status, payment_method, reference_id, notes, created_at
+            ) VALUES ($1, $2, 'refund', $3, $4, 'completed', 'system', $5, $6, NOW())`,
+            [
+              rollbackTxId,
+              dbUser.id,
+              costInUserCurrency,
+              userCurrency,
+              String(productId || cashType),
+              `استرجاع تلقائي: الطلب غير مكتمل لدى المزود (${supplierErrMsg})`,
+            ]
+          );
 
-        const userBalRes = await pool.query('SELECT balance FROM users WHERE id = $1', [dbUser.id]);
-        if (userBalRes.rows.length > 0) {
-          restoredBalance = parseFloat(userBalRes.rows[0].balance || '0');
+          const userBalRes = await pool.query('SELECT balance FROM users WHERE id = $1', [dbUser.id]);
+          if (userBalRes.rows.length > 0) {
+            restoredBalance = parseFloat(userBalRes.rows[0].balance || '0');
+          }
+        } catch (refundErr) {
+          console.error('Critical rollback refund error in DB:', refundErr);
         }
-      } catch (refundErr) {
-        console.error('Critical rollback refund error:', refundErr);
       }
 
-      // Record the failed order in orders table with status 'failed' ("غير مكتملة")
+      const memUser = findInMemoryUser(dbUser.id);
+      if (memUser) {
+        memUser.balance = (memUser.balance || 0) + costInUserCurrency;
+        memUser.updatedAt = new Date().toISOString();
+        restoredBalance = memUser.balance;
+      }
+
+      // Record the failed order in orders table and memory
       const failedOrderId = uniqueOperationOrderId;
-      try {
-        await pool.query(
-          `INSERT INTO orders (
-            id, order_id, sc_order_id, user_id, product_id, product_name, category, 
-            qty, price, total, currency, dynamic_fields, status, raw_response, 
-            notes, customer_name, customer_email, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
-          ON CONFLICT (id) DO UPDATE SET
-            status = EXCLUDED.status,
-            raw_response = EXCLUDED.raw_response,
-            notes = EXCLUDED.notes,
-            updated_at = NOW();`,
-          [
-            failedOrderId,
-            failedOrderId,
-            failedOrderId,
-            dbUser.id,
-            String(productId || cashType || ''),
-            prodName || 'منتج رقمي',
-            prodCategory || 'شحن',
-            orderQty,
-            unitPrice,
-            costInUserCurrency,
-            userCurrency,
-            JSON.stringify(dynamicFields || {}),
-            'failed',
-            JSON.stringify({ supplierError: supplierErrMsg, status: scResponse?.status || 500, response: scData }),
-            `طلب غير مكتمل - ${supplierErrMsg} (تم استرجاع الرصيد للمستخدم)`,
-            dbUser.name || customerName || '',
-            dbUser.email || userEmail || '',
-          ]
-        );
-      } catch (orderSaveErr) {
-        console.error('Failed to save failed order status in DB:', orderSaveErr);
+      const failedOrderObj = {
+        id: failedOrderId,
+        orderId: failedOrderId,
+        scOrderId: failedOrderId,
+        userId: dbUser.id,
+        productId: String(productId || cashType || ''),
+        productName: prodName || 'منتج رقمي',
+        category: prodCategory || 'شحن',
+        qty: orderQty,
+        price: unitPrice,
+        total: costInUserCurrency,
+        currency: userCurrency,
+        dynamicFields: dynamicFields || {},
+        status: 'failed',
+        statusLabel: 'غير مكتملة',
+        notes: `طلب غير مكتمل - ${supplierErrMsg} (تم استرجاع الرصيد للمستخدم)`,
+        customerName: dbUser.name || customerName || '',
+        customerEmail: dbUser.email || userEmail || '',
+        createdAt: new Date().toISOString(),
+      };
+      inMemoryOrders.set(failedOrderId, failedOrderObj);
+
+      if (pool) {
+        try {
+          await pool.query(
+            `INSERT INTO orders (
+              id, order_id, sc_order_id, user_id, product_id, product_name, category, 
+              qty, price, total, currency, dynamic_fields, status, raw_response, 
+              notes, customer_name, customer_email, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              status = EXCLUDED.status,
+              raw_response = EXCLUDED.raw_response,
+              notes = EXCLUDED.notes,
+              updated_at = NOW();`,
+            [
+              failedOrderId,
+              failedOrderId,
+              failedOrderId,
+              dbUser.id,
+              String(productId || cashType || ''),
+              prodName || 'منتج رقمي',
+              prodCategory || 'شحن',
+              orderQty,
+              unitPrice,
+              costInUserCurrency,
+              userCurrency,
+              JSON.stringify(dynamicFields || {}),
+              'failed',
+              JSON.stringify({ supplierError: supplierErrMsg, status: scResponse?.status || 500, response: scData }),
+              `طلب غير مكتمل - ${supplierErrMsg} (تم استرجاع الرصيد للمستخدم)`,
+              dbUser.name || customerName || '',
+              dbUser.email || userEmail || '',
+            ]
+          );
+        } catch (orderSaveErr) {
+          console.error('Failed to save failed order status in DB:', orderSaveErr);
+        }
       }
 
       const formattedError = isApiKeyErr
@@ -2805,39 +3454,66 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       });
     }
 
-    // 10. SC Store succeeded -> persist order in DB with unique order ID & supplier order ID
+    // 10. SC Store succeeded -> persist order
     const scOrderId = String(scData.order?.orderId || scData.orderId || scData.id || '').trim();
     const scStatus = String(scData.order?.status || scData.status || 'processing').toLowerCase();
 
-    await pool.query(
-      `INSERT INTO orders (
-        id, order_id, sc_order_id, user_id, product_id, product_name, category, 
-        qty, price, total, currency, dynamic_fields, status, raw_response, 
-        customer_name, customer_email, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        status = EXCLUDED.status,
-        raw_response = EXCLUDED.raw_response,
-        updated_at = NOW();`,
-      [
-        uniqueOperationOrderId,
-        uniqueOperationOrderId,
-        scOrderId || uniqueOperationOrderId,
-        dbUser.id,
-        String(productId || cashType || ''),
-        prodName || scData.order?.product || 'منتج رقمي',
-        prodCategory || scData.order?.category || '',
-        orderQty,
-        unitPrice,
-        costInUserCurrency,
-        userCurrency,
-        JSON.stringify(dynamicFields || {}),
-        scStatus,
-        JSON.stringify(scData),
-        dbUser.name || customerName,
-        dbUser.email || userEmail,
-      ]
-    );
+    const successOrderObj = {
+      id: uniqueOperationOrderId,
+      orderId: uniqueOperationOrderId,
+      scOrderId: scOrderId || uniqueOperationOrderId,
+      userId: dbUser.id,
+      productId: String(productId || cashType || ''),
+      productName: prodName || scData.order?.product || 'منتج رقمي',
+      category: prodCategory || scData.order?.category || '',
+      qty: orderQty,
+      price: unitPrice,
+      total: costInUserCurrency,
+      currency: userCurrency,
+      dynamicFields: dynamicFields || {},
+      status: scStatus,
+      rawResponse: scData,
+      customerName: dbUser.name || customerName,
+      customerEmail: dbUser.email || userEmail,
+      createdAt: new Date().toISOString(),
+    };
+    inMemoryOrders.set(uniqueOperationOrderId, successOrderObj);
+
+    if (pool) {
+      try {
+        await pool.query(
+          `INSERT INTO orders (
+            id, order_id, sc_order_id, user_id, product_id, product_name, category, 
+            qty, price, total, currency, dynamic_fields, status, raw_response, 
+            customer_name, customer_email, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            status = EXCLUDED.status,
+            raw_response = EXCLUDED.raw_response,
+            updated_at = NOW();`,
+          [
+            uniqueOperationOrderId,
+            uniqueOperationOrderId,
+            scOrderId || uniqueOperationOrderId,
+            dbUser.id,
+            String(productId || cashType || ''),
+            prodName || scData.order?.product || 'منتج رقمي',
+            prodCategory || scData.order?.category || '',
+            orderQty,
+            unitPrice,
+            costInUserCurrency,
+            userCurrency,
+            JSON.stringify(dynamicFields || {}),
+            scStatus,
+            JSON.stringify(scData),
+            dbUser.name || customerName,
+            dbUser.email || userEmail,
+          ]
+        );
+      } catch (dbOrderErr: any) {
+        console.warn('DB order save failed, stored in memory:', dbOrderErr.message);
+      }
+    }
 
     return res.json({
       error: false,

@@ -70,8 +70,21 @@ const SCHEMA_DEFINITIONS: TableDefinition[] = [
       { name: 'avatar', type: 'TEXT' },
       { name: 'api_key', type: 'TEXT' },
       { name: 'saved_player_ids', type: 'JSONB', default: "'{}'" },
+      { name: 'email_verified', type: 'BOOLEAN', default: 'false' },
       { name: 'created_at', type: 'TIMESTAMPTZ', default: 'NOW()' },
       { name: 'updated_at', type: 'TIMESTAMPTZ', default: 'NOW()' },
+    ],
+  },
+  {
+    name: 'email_verifications',
+    primaryKey: 'email VARCHAR(255) PRIMARY KEY',
+    columns: [
+      { name: 'code', type: 'VARCHAR(10)', nullable: false },
+      { name: 'user_data', type: 'JSONB' },
+      { name: 'expires_at', type: 'TIMESTAMPTZ', nullable: false },
+      { name: 'attempts', type: 'INTEGER', default: '0' },
+      { name: 'last_sent_at', type: 'TIMESTAMPTZ', default: 'NOW()' },
+      { name: 'created_at', type: 'TIMESTAMPTZ', default: 'NOW()' },
     ],
   },
   {

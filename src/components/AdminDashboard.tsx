@@ -111,6 +111,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
   const [userSearchQuery, setUserSearchQuery] = useState<string>('');
   const [selectedUserForEdit, setSelectedUserForEdit] = useState<AdminUserData | null>(null);
   const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState<boolean>(false);
+  const [userToDelete, setUserToDelete] = useState<AdminUserData | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState<boolean>(false);
   const [userActionMessage, setUserActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Edit User Form State
@@ -448,20 +450,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
     }
   };
 
-  // Delete User
-  const handleDeleteUser = async (userId: string, userName: string) => {
-    if (!window.confirm(`هل أنت متأكد من رغبتك في حذف حساب المستخدم "${userName}" نهائياً من قاعدة البيانات؟`)) {
-      return;
-    }
+  // Open Delete User Confirmation Modal
+  const handleOpenDeleteUser = (user: AdminUserData) => {
+    setUserToDelete(user);
+  };
 
-    const res = await deleteAdminUser(userId);
-    if (res.success) {
-      setUserActionMessage({ type: 'success', text: `تم حذف المستخدم ${userName} بنجاح!` });
-      await loadUsers();
-      await loadStats();
-      setTimeout(() => setUserActionMessage(null), 4000);
-    } else {
-      setUserActionMessage({ type: 'error', text: res.error || 'فشل حذف المستخدم' });
+  // Confirm Delete User
+  const handleConfirmDeleteUser = async () => {
+    if (!userToDelete) return;
+
+    setIsDeletingUser(true);
+    try {
+      const res = await deleteAdminUser(userToDelete.id);
+      if (res.success) {
+        setUserActionMessage({ type: 'success', text: `تم حذف المستخدم "${userToDelete.name}" بنجاح من قاعدة البيانات!` });
+        setUserToDelete(null);
+        await loadUsers();
+        await loadStats();
+        setTimeout(() => setUserActionMessage(null), 4000);
+      } else {
+        setUserActionMessage({ type: 'error', text: res.error || 'فشل حذف المستخدم' });
+      }
+    } catch (err: any) {
+      setUserActionMessage({ type: 'error', text: err.message || 'تعذر الاتصال بالخادم لحذف المستخدم' });
+    } finally {
+      setIsDeletingUser(false);
     }
   };
 
@@ -1136,9 +1149,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
 
                         <button
                           type="button"
-                          onClick={() => handleDeleteUser(u.id, u.name)}
+                          onClick={() => handleOpenDeleteUser(u)}
                           className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
-                          title="حذف المستخدم"
+                          title="حذف حساب المستخدم"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -2408,6 +2421,89 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 10. MODAL: CONFIRM DELETE USER */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-[#151221] border border-gray-200 dark:border-white/10 rounded-3xl p-6 sm:p-8 w-full max-w-md shadow-2xl space-y-6 animate-in zoom-in-95 text-right">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                  تأكيد حذف حساب المستخدم
+                </h3>
+                <span className="text-xs text-slate-400">إجراء نهائي لا يمكن التراجع عنه</span>
+              </div>
+            </div>
+
+            <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-2xl space-y-2.5 text-xs sm:text-sm">
+              <p className="text-slate-800 dark:text-slate-200 font-bold">
+                هل أنت متأكد من رغبتك في حذف هذا الحساب نهائياً؟
+              </p>
+              <div className="p-3 bg-white dark:bg-slate-900/80 rounded-xl border border-red-100 dark:border-red-900/30 space-y-1 font-mono text-xs">
+                <div className="text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span className="font-sans font-semibold text-slate-500">الاسم:</span>
+                  <span className="font-bold">{userToDelete.name}</span>
+                </div>
+                <div className="text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span className="font-sans font-semibold text-slate-500">المعرف:</span>
+                  <span className="text-[11px]">{userToDelete.id}</span>
+                </div>
+                {userToDelete.email && (
+                  <div className="text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                    <span className="font-sans font-semibold text-slate-500">البريد:</span>
+                    <span className="text-[11px] truncate max-w-[200px]">{userToDelete.email}</span>
+                  </div>
+                )}
+                {userToDelete.phone && (
+                  <div className="text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                    <span className="font-sans font-semibold text-slate-500">الهاتف:</span>
+                    <span>{userToDelete.phone}</span>
+                  </div>
+                )}
+                <div className="text-slate-700 dark:text-slate-300 flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800">
+                  <span className="font-sans font-semibold text-slate-500">الرصيد:</span>
+                  <span className="font-bold text-purple-600 dark:text-purple-400">{userToDelete.balance?.toLocaleString()} {userToDelete.currency || 'SYP'}</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-red-600 dark:text-red-400">
+                ⚠️ سيتم حذف الحساب بالكامل من قاعدة البيانات وإلغاء صلاحية تسجيل الدخول فوراً.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingUser}
+                onClick={handleConfirmDeleteUser}
+                className="flex-1 py-3 px-4 bg-red-600 hover:bg-red-700 active:scale-98 text-white font-bold rounded-xl transition-all shadow-md shadow-red-600/25 cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isDeletingUser ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>جارٍ الحذف...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>نعم، حذف الحساب نهائياً</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingUser}
+                onClick={() => setUserToDelete(null)}
+                className="px-5 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-200 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                إلغاء
+              </button>
+            </div>
           </div>
         </div>
       )}

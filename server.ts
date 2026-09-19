@@ -478,7 +478,7 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
         } else {
           const userId = `USR-${Date.now().toString().slice(-6)}`;
           const userRole = isAdminEmail(cleanEmail) ? 'admin' : 'customer';
-          const initialBal = userRole === 'admin' ? 2500000 : 150000;
+          const initialBal = userRole === 'admin' ? 2500000 : 0.0;
 
           const inserted = await pool.query(
             `INSERT INTO users (id, name, email, phone, password_hash, balance, currency, role, avatar, api_key, saved_player_ids, email_verified, created_at, updated_at)
@@ -526,7 +526,7 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
         name: record.userData.name,
         email: cleanEmail,
         phone: record.userData.phone || null,
-        balance: role === 'admin' ? 2500000 : 150000,
+        balance: role === 'admin' ? 2500000 : 0.0,
         currency: 'SYP',
         role,
         avatar: record.userData.avatar || null,
@@ -715,7 +715,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           `INSERT INTO users (id, name, email, phone, balance, currency, role, email_verified, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())
            RETURNING *`,
-          [newId, newName, newEmail, newPhone, role === 'admin' ? 2500000 : 150000, 'SYP', role]
+          [newId, newName, newEmail, newPhone, role === 'admin' ? 2500000 : 0.0, 'SYP', role]
         );
 
         const user = created.rows[0];
@@ -754,7 +754,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         name: newName,
         email: newEmail,
         phone: newPhone,
-        balance: role === 'admin' ? 2500000 : 150000,
+        balance: role === 'admin' ? 2500000 : 0.0,
         currency: 'SYP',
         role,
         savedPlayerIds: {},
@@ -900,7 +900,7 @@ app.get('/api/users/profile/:idOrEmail', async (req: Request, res: Response) => 
         name: isEmail ? clean.split('@')[0] : `مستخدم ${clean.slice(-4)}`,
         email: newEmail,
         phone: !isEmail ? clean : null,
-        balance: role === 'admin' ? 2500000 : 150000,
+        balance: role === 'admin' ? 2500000 : 0.0,
         currency: 'SYP',
         role,
         savedPlayerIds: {},
@@ -1870,23 +1870,41 @@ app.put('/api/admin/users/:userId', async (req: Request, res: Response) => {
 });
 
 // 4. Admin: Delete a user
-app.delete('/api/admin/users/:userId', async (req: Request, res: Response) => {
+app.delete(['/api/admin/users/:userId', '/api/users/:userId'], async (req: Request, res: Response) => {
   const { userId } = req.params;
   if (!userId) {
     return res.status(400).json({ error: 'User ID is required' });
   }
 
   try {
+    // Clean up from memory map if present
+    inMemoryUsers.delete(userId);
+    for (const [key, val] of inMemoryUsers.entries()) {
+      if (val.id === userId || val.email === userId) {
+        inMemoryUsers.delete(key);
+      }
+    }
+
     const pool = getDbPool();
     if (!pool) {
       return res.json({ success: true, message: 'Deleted from memory' });
     }
 
-    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
-    return res.json({ success: true, message: 'تم حذف المستخدم بنجاح' });
+    // Clean up dependent records safely so foreign key or orphaned constraints never block deletion
+    await pool.query('DELETE FROM saved_game_ids WHERE user_id = $1', [userId]).catch(() => null);
+    await pool.query('DELETE FROM wallet_transactions WHERE user_id = $1', [userId]).catch(() => null);
+    await pool.query('DELETE FROM deposit_requests WHERE user_id = $1', [userId]).catch(() => null);
+    await pool.query('UPDATE orders SET user_id = NULL WHERE user_id = $1', [userId]).catch(() => null);
+
+    const deleteRes = await pool.query('DELETE FROM users WHERE id = $1 OR email = $1 RETURNING id', [userId]);
+    return res.json({ 
+      success: true, 
+      message: 'تم حذف المستخدم بنجاح',
+      deletedId: deleteRes.rows[0]?.id || userId 
+    });
   } catch (err: any) {
     console.error('Error in DELETE /api/admin/users/:userId:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || 'فشل حذف المستخدم من قاعدة البيانات' });
   }
 });
 
@@ -3135,7 +3153,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
           id: fallbackId,
           name: fallbackName,
           email: fallbackEmail,
-          balance: 150000,
+          balance: 0.0,
           currency: 'SYP',
           role: 'customer',
           savedPlayerIds: {},

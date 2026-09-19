@@ -77,7 +77,14 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<CustomerUser | null>(() => {
     try {
       const saved = localStorage.getItem('nexen_user_session');
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      // If a non-admin session had the legacy 150,000 SYP demo balance, reset it to 0
+      if (parsed && parsed.role !== 'admin' && parsed.balance === 150000) {
+        parsed.balance = 0;
+        localStorage.setItem('nexen_user_session', JSON.stringify(parsed));
+      }
+      return parsed;
     } catch {
       return null;
     }

@@ -11,7 +11,6 @@ import { CategoryCard, CategorySummary } from './store/CategoryCard';
 import { GameCard, GameGroup } from './store/GameCard';
 import { PackageCard } from './store/PackageCard';
 import { GamePackagesView } from './store/GamePackagesView';
-import { BannerSlider } from './BannerSlider';
 import { isProductSearchMatch, isGameSearchMatch } from '../utils/searchUtils';
 import { GuestAccessModal } from './GuestAccessModal';
 
@@ -33,8 +32,6 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
   error,
   onRefresh,
   onSelectProduct,
-  banners = [],
-  onOpenBannerManager,
   currentUser,
   onOpenAuth,
 }) => {
@@ -246,15 +243,6 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
             onNavigateCategory={handleNavigateBackToCategory}
           />
         </div>
-      )}
-
-      {/* Main Screen Animated Banner Slider (Directly below top header, above search and categories) */}
-      {!selectedCategory && !selectedGame && !searchQuery.trim() && banners && banners.length > 0 && (
-        <BannerSlider
-          banners={banners}
-          onOpenManageModal={onOpenBannerManager}
-          onSelectCategory={handleSelectCategory}
-        />
       )}
 
       {/* Global & Contextual Search Bar */}

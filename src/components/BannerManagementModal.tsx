@@ -181,10 +181,8 @@ export const BannerManagementModal: React.FC<BannerManagementModalProps> = ({
   };
 
   const handleResetToDefault = () => {
-    if (window.confirm('هل تريد استعادة البنرات الإعلانية الافتراضية الخاصة بـ Nexen Store؟')) {
-      setBannerList(DEFAULT_STORE_BANNERS);
-      resetForm();
-    }
+    setBannerList(DEFAULT_STORE_BANNERS);
+    resetForm();
   };
 
   const handleSaveAllAndClose = () => {

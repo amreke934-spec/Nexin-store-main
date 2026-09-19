@@ -100,6 +100,9 @@ export const AdminDepositsTab: React.FC<AdminDepositsTabProps> = ({
     error: null,
   });
 
+  const [methodToDelete, setMethodToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [isDeletingMethod, setIsDeletingMethod] = useState<boolean>(false);
+
   // Copy state for TX numbers & addresses
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -275,18 +278,21 @@ export const AdminDepositsTab: React.FC<AdminDepositsTabProps> = ({
     }
   };
 
-  const handleDeleteMethod = async (id: string, name: string) => {
-    if (!window.confirm(`هل أنت متأكد من حذف طريقة الإيداع "${name}"؟`)) return;
-
+  const handleConfirmDeleteMethod = async () => {
+    if (!methodToDelete) return;
+    setIsDeletingMethod(true);
     try {
-      const res = await deleteDepositMethod(id);
+      const res = await deleteDepositMethod(methodToDelete.id);
       if (res.success) {
+        setMethodToDelete(null);
         await loadMethods();
       } else {
         alert(res.error || 'فشل حذف طريقة الإيداع');
       }
     } catch (err: any) {
-      alert(err.message || 'خطأ أثناء الحذف');
+      console.error('Error deleting method:', err);
+    } finally {
+      setIsDeletingMethod(false);
     }
   };
 
@@ -741,7 +747,7 @@ export const AdminDepositsTab: React.FC<AdminDepositsTabProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleDeleteMethod(method.id, method.name)}
+                        onClick={() => setMethodToDelete({ id: method.id, name: method.name })}
                         className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-100 transition-colors cursor-pointer"
                         title="حذف"
                       >
@@ -1293,6 +1299,57 @@ export const AdminDepositsTab: React.FC<AdminDepositsTabProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Delete Method Confirmation Modal */}
+      {methodToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-[#151221] border border-gray-200 dark:border-white/10 rounded-3xl p-6 sm:p-8 w-full max-w-md shadow-2xl space-y-5 text-right">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                  حذف طريقة الإيداع
+                </h3>
+                <span className="text-xs text-slate-400">تأكيد عملية الحذف</span>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-700 dark:text-slate-300">
+              هل أنت متأكد من رغبتك في حذف طريقة الإيداع <strong className="text-rose-600">"{methodToDelete.name}"</strong>؟
+            </p>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingMethod}
+                onClick={handleConfirmDeleteMethod}
+                className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-md shadow-rose-600/25 cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isDeletingMethod ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>جارٍ الحذف...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>نعم، حذف الطريقة</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingMethod}
+                onClick={() => setMethodToDelete(null)}
+                className="px-5 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-200 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                إلغاء
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -225,6 +225,17 @@ export async function initializeDatabase(): Promise<{ success: boolean; error?: 
       CREATE INDEX IF NOT EXISTS idx_deposit_requests_status ON deposit_requests(status);
     `);
 
+    // Reset any legacy non-admin accounts that had the accidental 150,000 SYP initial demo balance to 0.00
+    try {
+      await client.query(`
+        UPDATE users 
+        SET balance = 0.00, updated_at = NOW() 
+        WHERE (role IS NULL OR role != 'admin') AND balance = 150000;
+      `);
+    } catch (balResetErr: any) {
+      console.warn('[Neon DB] Notice on balance reset query:', balResetErr.message);
+    }
+
     // Insert default exchange rate setting if not present
     await client.query(`
       INSERT INTO store_settings (key, value, updated_at)

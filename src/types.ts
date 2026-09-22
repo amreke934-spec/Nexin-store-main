@@ -179,3 +179,22 @@ export interface MaintenanceSettings {
   updatedBy?: string;
 }
 
+export interface SupportTicket {
+  id: string; // e.g. TKT-123456
+  userId?: string | null;
+  userName: string;
+  userEmail: string;
+  userPhone?: string | null;
+  subject: string;
+  category: 'order' | 'deposit' | 'account' | 'technical' | 'suggestion' | 'other' | string;
+  message: string;
+  status: 'pending' | 'in_progress' | 'resolved' | 'closed';
+  priority?: 'normal' | 'urgent';
+  adminReply?: string | null;
+  repliedAt?: string | null;
+  repliedBy?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+

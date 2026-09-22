@@ -13,6 +13,7 @@ interface BottomNavProps {
   ordersCount: number;
   isLoggedIn: boolean;
   isMaintenanceLocked?: boolean;
+  isKeyboardOpen?: boolean;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = React.memo(({
@@ -25,6 +26,7 @@ export const BottomNav: React.FC<BottomNavProps> = React.memo(({
   ordersCount,
   isLoggedIn,
   isMaintenanceLocked = false,
+  isKeyboardOpen = false,
 }) => {
   const isOrdersActive = activeTab === 'orders' || activeTab === 'track';
   const [showLockToast, setShowLockToast] = useState(false);
@@ -84,8 +86,10 @@ export const BottomNav: React.FC<BottomNavProps> = React.memo(({
         id="bottom-navigation-bar"
         aria-label="شريط التنقل السفلي"
         dir="rtl"
-        style={{ left: '50%', transform: 'translateX(-50%)' }}
-        className={`fixed bottom-3 sm:bottom-4 z-40 w-[94%] max-w-md glass-nav rounded-2xl sm:rounded-3xl p-1.5 sm:p-2 shadow-2xl border backdrop-blur-xl transition-all ${
+        style={{ left: '50%', transform: 'translateX(-50%)', bottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))' }}
+        className={`fixed z-40 w-[95%] min-[400px]:w-[92%] sm:w-[88%] max-w-md glass-nav rounded-2xl sm:rounded-3xl p-1 sm:p-1.5 md:p-2 shadow-2xl border backdrop-blur-xl transition-all duration-300 ease-in-out ${
+          isKeyboardOpen ? 'translate-y-36 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'
+        } ${
           isMaintenanceLocked
             ? 'border-amber-500/40 bg-slate-900/90 shadow-amber-500/10'
             : 'border-slate-200/90 dark:border-slate-800/90'
@@ -97,7 +101,7 @@ export const BottomNav: React.FC<BottomNavProps> = React.memo(({
             id="bottom-nav-home-btn"
             type="button"
             onClick={handleHomeClick}
-            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl sm:rounded-2xl transition-all duration-200 cursor-pointer select-none group relative ${
+            className={`flex flex-col items-center justify-center py-1.5 sm:py-2 px-0.5 sm:px-1 rounded-xl sm:rounded-2xl transition-all duration-200 cursor-pointer select-none group relative ${
               activeTab === 'products'
                 ? isMaintenanceLocked
                   ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30 font-bold scale-[1.03]'
@@ -105,8 +109,8 @@ export const BottomNav: React.FC<BottomNavProps> = React.memo(({
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-white/5'
             }`}
           >
-            <Home className="w-5 h-5 transition-transform group-hover:scale-110" />
-            <span className="text-[10px] sm:text-xs mt-1 font-medium tracking-tight">الرئيسية</span>
+            <Home className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:scale-110" />
+            <span className="text-[9.5px] sm:text-xs mt-0.5 sm:mt-1 font-medium tracking-tight">الرئيسية</span>
             {activeTab === 'products' && (
               <span className="absolute -bottom-0.5 w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
             )}
@@ -118,7 +122,7 @@ export const BottomNav: React.FC<BottomNavProps> = React.memo(({
             type="button"
             onClick={handleOrdersClick}
             aria-disabled={isMaintenanceLocked}
-            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl sm:rounded-2xl transition-all duration-200 cursor-pointer select-none group relative ${
+            className={`flex flex-col items-center justify-center py-1.5 sm:py-2 px-0.5 sm:px-1 rounded-xl sm:rounded-2xl transition-all duration-200 cursor-pointer select-none group relative ${
               isMaintenanceLocked
                 ? 'opacity-40 hover:opacity-70 text-slate-400 dark:text-slate-500'
                 : isOrdersActive
@@ -130,15 +134,15 @@ export const BottomNav: React.FC<BottomNavProps> = React.memo(({
               {isMaintenanceLocked ? (
                 <Lock className="w-4 h-4 text-amber-500" />
               ) : (
-                <Package className="w-5 h-5 transition-transform group-hover:scale-110" />
+                <Package className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:scale-110" />
               )}
               {!isMaintenanceLocked && ordersCount > 0 && (
-                <span className="absolute -top-1.5 -right-2.5 bg-purple-500 text-white text-[9px] font-bold px-1.5 py-0.2 rounded-full font-mono border-2 border-white dark:border-slate-900 shadow-xs">
+                <span className="absolute -top-1.5 -right-2.5 bg-purple-500 text-white text-[8.5px] sm:text-[9px] font-bold px-1.5 py-0.2 rounded-full font-mono border-2 border-white dark:border-slate-900 shadow-xs">
                   {ordersCount}
                 </span>
               )}
             </div>
-            <span className="text-[10px] sm:text-xs mt-1 font-medium tracking-tight flex items-center gap-1">
+            <span className="text-[9.5px] sm:text-xs mt-0.5 sm:mt-1 font-medium tracking-tight flex items-center gap-1">
               {isMaintenanceLocked && <span className="text-[9px] text-amber-500">🔒</span>}
               الطلبات
             </span>
@@ -152,7 +156,7 @@ export const BottomNav: React.FC<BottomNavProps> = React.memo(({
             id="bottom-nav-deposit-btn"
             type="button"
             onClick={handleDepositClick}
-            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl sm:rounded-2xl transition-all duration-200 cursor-pointer select-none group relative ${
+            className={`flex flex-col items-center justify-center py-1.5 sm:py-2 px-0.5 sm:px-1 rounded-xl sm:rounded-2xl transition-all duration-200 cursor-pointer select-none group relative ${
               isMaintenanceLocked && isLoggedIn
                 ? 'opacity-40 hover:opacity-70 text-slate-400 dark:text-slate-500'
                 : activeTab === 'deposit'
@@ -164,10 +168,10 @@ export const BottomNav: React.FC<BottomNavProps> = React.memo(({
               {isMaintenanceLocked && isLoggedIn ? (
                 <Lock className="w-4 h-4 text-amber-500" />
               ) : (
-                <Wallet className="w-5 h-5 transition-transform group-hover:scale-110" />
+                <Wallet className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:scale-110" />
               )}
             </div>
-            <span className="text-[10px] sm:text-xs mt-1 font-medium tracking-tight flex items-center gap-1">
+            <span className="text-[9.5px] sm:text-xs mt-0.5 sm:mt-1 font-medium tracking-tight flex items-center gap-1">
               {isMaintenanceLocked && isLoggedIn && <span className="text-[9px] text-amber-500">🔒</span>}
               إيداع
             </span>
@@ -181,7 +185,7 @@ export const BottomNav: React.FC<BottomNavProps> = React.memo(({
             id="bottom-nav-auth-btn"
             type="button"
             onClick={handleAccountClick}
-            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl sm:rounded-2xl transition-all duration-200 cursor-pointer select-none group relative ${
+            className={`flex flex-col items-center justify-center py-1.5 sm:py-2 px-0.5 sm:px-1 rounded-xl sm:rounded-2xl transition-all duration-200 cursor-pointer select-none group relative ${
               isMaintenanceLocked && isLoggedIn
                 ? 'opacity-40 hover:opacity-70 text-slate-400 dark:text-slate-500'
                 : activeTab === 'auth' || activeTab === 'settings'
@@ -194,7 +198,7 @@ export const BottomNav: React.FC<BottomNavProps> = React.memo(({
                 <Lock className="w-4 h-4 text-amber-500" />
               ) : isLoggedIn ? (
                 <>
-                  <User className="w-5 h-5 transition-transform group-hover:scale-110" />
+                  <User className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:scale-110" />
                   <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full border border-white dark:border-slate-900" />
                 </>
               ) : (

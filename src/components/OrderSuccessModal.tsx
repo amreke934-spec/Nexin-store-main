@@ -59,12 +59,12 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   return (
     <div
       id="order-success-modal-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/70 backdrop-blur-xs select-none animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-xs select-none animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
         id="order-success-modal-card"
-        className="relative w-full max-w-lg bg-white dark:bg-[#151221] rounded-3xl border border-emerald-200/80 dark:border-emerald-900/40 shadow-2xl shadow-emerald-950/20 overflow-hidden transform transition-all duration-300 animate-in zoom-in-95 text-center"
+        className="relative w-full max-w-lg max-h-[92dvh] overflow-y-auto bg-white dark:bg-[#151221] rounded-2xl sm:rounded-3xl border border-emerald-200/80 dark:border-emerald-900/40 shadow-2xl shadow-emerald-950/20 transform transition-all duration-300 animate-in zoom-in-95 text-center"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Header Banner */}

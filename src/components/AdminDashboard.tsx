@@ -35,6 +35,7 @@ import {
   Wrench,
   Phone,
   UserCheck,
+  LifeBuoy,
 } from 'lucide-react';
 import { CustomerUser, MerchantInfo, OrderItem, MaintenanceSettings } from '../types';
 import { extractChargedAccount } from '../utils/orderUtils';
@@ -47,6 +48,7 @@ import {
   checkAdminOrderDetails,
   saveStoreSetting,
   syncProcessingOrdersInDb,
+  fetchSupportTickets,
   AdminStatsData,
   AdminUserData,
   AdminOrderCheckResult,
@@ -70,6 +72,7 @@ import {
 } from '../services/scStoreApi';
 import { AdminDepositsTab } from './admin/AdminDepositsTab';
 import { AdminMaintenanceTab } from './admin/AdminMaintenanceTab';
+import { AdminTicketsTab } from './admin/AdminTicketsTab';
 
 interface AdminDashboardProps {
   currentUser: CustomerUser | null;
@@ -80,7 +83,7 @@ interface AdminDashboardProps {
   onNavigateSettings: () => void;
   onOpenBannerManager?: () => void;
   onRefreshProducts?: () => void;
-  initialTab?: 'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance';
+  initialTab?: 'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance' | 'tickets';
   onMaintenanceChange?: (settings: MaintenanceSettings) => void;
 }
 
@@ -99,7 +102,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
   onMaintenanceChange,
 }) => {
   // Active Tab inside Admin Panel
-  const [activeAdminTab, setActiveAdminTab] = useState<'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance'>(initialTab || 'stats');
+  const [activeAdminTab, setActiveAdminTab] = useState<'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance' | 'tickets'>(initialTab || 'stats');
+
+  // Support Tickets State
+  const [pendingTicketsCount, setPendingTicketsCount] = useState<number>(0);
 
   // Stats State
   const [stats, setStats] = useState<AdminStatsData | null>(null);
@@ -361,12 +367,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
     }
   }, []);
 
+  // Load Pending Support Tickets Count
+  const loadPendingTicketsCount = useCallback(async () => {
+    try {
+      const res = await fetchSupportTickets({ isAdmin: true });
+      if (res.success && Array.isArray(res.tickets)) {
+        const pending = res.tickets.filter((t) => !t.adminReply && t.status !== 'resolved').length;
+        setPendingTicketsCount(pending);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Initial loading
   useEffect(() => {
     loadStats();
     loadUsers();
     loadApiKeyStatus();
     loadSyncSettings();
+    loadPendingTicketsCount();
 
     // Fetch live profit margin configuration from database
     fetchProfitMarginFromServer().then((remoteConfig) => {
@@ -376,7 +396,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
         setProfitFixedInput(String(remoteConfig.fixedMarginUsd));
       }
     });
-  }, [loadStats, loadUsers, loadApiKeyStatus, loadSyncSettings]);
+  }, [loadStats, loadUsers, loadApiKeyStatus, loadSyncSettings, loadPendingTicketsCount]);
 
   // Open Edit User Modal
   const handleOpenEditUser = (user: AdminUserData) => {
@@ -754,6 +774,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
         >
           <Wallet className="w-4 h-4" />
           <span>طلبات وطرق الإيداع 💰</span>
+        </button>
+
+        <button
+          id="tab-btn-tickets"
+          type="button"
+          onClick={() => setActiveAdminTab('tickets')}
+          className={`flex items-center gap-2 py-3 px-5 rounded-2xl text-xs sm:text-sm font-bold transition-all duration-200 whitespace-nowrap cursor-pointer ${
+            activeAdminTab === 'tickets'
+              ? 'bg-[#7F00FF] text-white shadow-md shadow-[#7F00FF]/25 scale-[1.02]'
+              : 'bg-white dark:bg-[#151221] text-slate-700 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-purple-950/30 border border-slate-200/80 dark:border-white/10'
+          }`}
+        >
+          <LifeBuoy className="w-4 h-4" />
+          <span>بلاغات المشاكل والدعم 💬</span>
+          {pendingTicketsCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-white animate-pulse">
+              {pendingTicketsCount}
+            </span>
+          )}
         </button>
 
         <button
@@ -2157,6 +2196,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = React.memo(({
           onSettingsUpdated={(newSettings) => {
             onMaintenanceChange?.(newSettings);
           }}
+        />
+      )}
+
+      {/* 7.7. TAB: SUPPORT TICKETS & PROBLEM REPORTS */}
+      {activeAdminTab === 'tickets' && (
+        <AdminTicketsTab
+          currentUser={currentUser}
         />
       )}
 

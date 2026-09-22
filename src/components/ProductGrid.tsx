@@ -2,12 +2,11 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { 
   Search, 
   AlertCircle, 
-  RefreshCw, 
+  RefreshCw,
   ArrowRight
 } from 'lucide-react';
 import { Product, StoreBanner, CustomerUser } from '../types';
-import { Breadcrumbs } from './store/Breadcrumbs';
-import { CategoryCard, CategorySummary } from './store/CategoryCard';
+import { CategoryCard, CategorySummary, getArabicCategoryName } from './store/CategoryCard';
 import { GameCard, GameGroup } from './store/GameCard';
 import { PackageCard } from './store/PackageCard';
 import { GamePackagesView } from './store/GamePackagesView';
@@ -61,8 +60,8 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
   }, [scrollToTop]);
 
   const handleSelectCategory = useCallback((categoryName: string) => {
-    setSelectedCategory(categoryName);
-    const catProducts = products.filter((p) => (p.category || 'أخرى') === categoryName);
+    setSelectedCategory((prev) => (prev === categoryName ? null : categoryName));
+    const catProducts = products.filter((p) => getArabicCategoryName(p.category || 'أخرى') === categoryName);
     const uniqueGames = Array.from(new Set(catProducts.map((p) => p.gameName || p.name || 'عام')));
     if (uniqueGames.length === 1 && currentUser) {
       setSelectedGame(uniqueGames[0]);
@@ -106,7 +105,7 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
       setSelectedGame(null);
       return;
     }
-    const catProducts = products.filter((p) => (p.category || 'أخرى') === selectedCategory);
+    const catProducts = products.filter((p) => getArabicCategoryName(p.category || 'أخرى') === selectedCategory);
     const uniqueGames = Array.from(new Set(catProducts.map((p) => p.gameName || p.name || 'عام')));
     if (uniqueGames.length <= 1) {
       setSelectedCategory(null);
@@ -123,7 +122,7 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
     const map = new Map<string, { games: Map<string, Product[]>; totalPackages: number }>();
 
     products.forEach((p) => {
-      const cat = p.category || 'أخرى';
+      const cat = getArabicCategoryName(p.category || 'أخرى');
       const gName = p.gameName || p.name || 'عام';
 
       if (!map.has(cat)) {
@@ -158,7 +157,7 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
   const gamesInCategory = useMemo<GameGroup[]>(() => {
     if (!selectedCategory) return [];
 
-    const categoryProducts = products.filter((p) => (p.category || 'أخرى') === selectedCategory);
+    const categoryProducts = products.filter((p) => getArabicCategoryName(p.category || 'أخرى') === selectedCategory);
     const gamesMap = new Map<string, Product[]>();
 
     categoryProducts.forEach((p) => {
@@ -233,18 +232,6 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
 
   return (
     <div className="space-y-6 sm:space-y-8">
-      {/* Top Breadcrumb Navigation */}
-      {(selectedCategory || selectedGame) && (
-        <div className="bg-gray-50 dark:bg-white/5 border border-gray-200/80 dark:border-white/10 rounded-2xl px-4 py-2.5 shadow-xs transition-colors">
-          <Breadcrumbs
-            categoryName={selectedCategory}
-            gameName={selectedGame}
-            onNavigateHome={handleNavigateHome}
-            onNavigateCategory={handleNavigateBackToCategory}
-          />
-        </div>
-      )}
-
       {/* Global & Contextual Search Bar */}
       <div className="relative max-w-2xl mx-auto">
         <input
@@ -291,8 +278,8 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
 
       {/* Loading Skeletons */}
       {isLoading && products.length === 0 && (
-        <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => (
+        <div className="grid grid-cols-2 min-[360px]:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3 md:gap-4">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => (
             <div key={i} className="bg-white dark:bg-[#151221] border border-gray-100 dark:border-white/10 rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 animate-pulse space-y-2.5">
               <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gray-200 dark:bg-white/10 rounded-lg sm:rounded-xl" />
               <div className="h-3.5 bg-gray-200 dark:bg-white/10 rounded w-2/3" />
@@ -306,22 +293,22 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
       {/* ========================================================
           TIER 1: MAIN HOME - CATEGORIES GRID
           ======================================================== */}
-      {!isLoading && selectedCategory === null && (
+      {!isLoading && selectedCategory === null && selectedGame === null && (
         <div className="space-y-6">
-          {/* If user searched on Home screen */}
+          {/* Global Search Results (when searching on home screen) */}
           {searchQuery.trim() ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-extrabold text-[#1A1A1A] dark:text-white">
+                <h2 className="text-sm sm:text-base font-extrabold text-[#1A1A1A] dark:text-white">
                   نتائج البحث عن: "{searchQuery}"
                 </h2>
-                <span className="text-xs font-bold text-[#7F00FF] dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 px-2.5 py-0.5 rounded-full">
+                <span className="text-[11px] sm:text-xs font-bold text-[#7F00FF] dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 px-2.5 py-0.5 rounded-full">
                   {globalSearchResults.length} نتيجة مطابقة
                 </span>
               </div>
 
               {globalSearchResults.length > 0 ? (
-                <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
+                <div className="grid grid-cols-1 min-[340px]:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 sm:gap-3.5 md:gap-4">
                   {globalSearchResults.map((prod) => (
                     <PackageCard
                       key={prod.id}
@@ -340,8 +327,8 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
             </div>
           ) : (
             <div className="space-y-5">
-              {/* Grid of Compact Category Cards (3 Cards Per Row on all screens) */}
-              <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
+              {/* Grid of Compact Category Cards */}
+              <div className="grid grid-cols-2 min-[360px]:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-3.5 md:gap-4">
                 {categoriesData.map((cat) => (
                   <CategoryCard
                     key={cat.name}
@@ -356,35 +343,35 @@ export const ProductGrid: React.FC<ProductGridProps> = React.memo(({
       )}
 
       {/* ========================================================
-          TIER 2: CATEGORY SUB-PAGE - GAMES / APPS LIST
+          TIER 2: DEDICATED SEPARATE CATEGORY PAGE (GAMES / APPS)
           ======================================================== */}
       {!isLoading && selectedCategory !== null && selectedGame === null && (
-        <div className="space-y-4 animate-in fade-in duration-200">
-          {/* Clean Header Bar */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base sm:text-lg font-black text-[#1A1A1A] dark:text-white flex items-center gap-2">
-                <span className="w-2.5 h-5 bg-[#7F00FF] rounded-full inline-block" />
+        <div className="space-y-5 animate-in fade-in duration-200">
+          {/* Clean Header Bar with Back Button and Category Name */}
+          <div className="flex items-center justify-between gap-3 bg-white dark:bg-[#151221] border border-gray-200/80 dark:border-white/10 rounded-2xl p-3 sm:p-4 shadow-xs">
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              <button
+                onClick={handleNavigateHome}
+                className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 sm:py-2 bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-[#7F00FF] dark:text-purple-300 text-xs sm:text-sm font-bold rounded-xl transition-all border border-purple-100 dark:border-purple-800/40 active:scale-95 cursor-pointer"
+              >
+                <ArrowRight className="w-4 h-4" />
+                <span>العودة للأقسام</span>
+              </button>
+              <h2 className="text-sm sm:text-base md:text-lg font-black text-[#1A1A1A] dark:text-white flex items-center gap-2">
+                <span className="w-2 h-4 sm:w-2.5 sm:h-5 bg-[#7F00FF] rounded-full inline-block" />
                 <span>{selectedCategory}</span>
               </h2>
-              <span className="text-xs font-bold text-[#7F00FF] dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 border border-purple-100 dark:border-purple-800/40 px-2.5 py-0.5 rounded-full">
-                {gamesInCategory.length} متوفر
-              </span>
             </div>
 
-            <button
-              onClick={handleNavigateHome}
-              className="text-xs text-[#7F00FF] dark:text-purple-300 hover:text-[#6b00d6] font-bold inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 dark:hover:bg-purple-900/60 rounded-xl cursor-pointer transition-colors border border-purple-100 dark:border-purple-800/40"
-            >
-              <ArrowRight className="w-3.5 h-3.5" />
-              <span>العودة للأقسام</span>
-            </button>
+            <span className="text-xs font-bold text-[#7F00FF] dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 border border-purple-100 dark:border-purple-800/40 px-2.5 py-1 rounded-full shrink-0">
+              {gamesInCategory.length} متوفر
+            </span>
           </div>
 
-          {/* Games / Apps Grid (3 Cards Per Row) */}
+          {/* Games / Apps Grid (Adaptive Columns Per Screen Size) */}
           <div className="space-y-3">
             {gamesInCategory.length > 0 ? (
-              <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
+              <div className="grid grid-cols-1 min-[340px]:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 sm:gap-3.5 md:gap-4">
                 {gamesInCategory.map((game) => (
                   <GameCard
                     key={game.gameName}

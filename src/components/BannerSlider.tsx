@@ -142,7 +142,7 @@ export const BannerSlider: React.FC<BannerSliderProps> = React.memo(({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        className="relative w-full aspect-[16/7] sm:aspect-[21/8] md:aspect-[21/7] rounded-2xl sm:rounded-3xl overflow-hidden bg-gradient-to-br from-[#0b031c] via-[#160633] to-[#080214] border border-purple-500/30 dark:border-purple-500/40 shadow-xl shadow-purple-950/20 transition-all duration-300"
+        className="relative w-full aspect-[16/9] min-[480px]:aspect-[16/8] sm:aspect-[21/8] md:aspect-[21/7] min-h-[145px] sm:min-h-[190px] md:min-h-[220px] rounded-2xl sm:rounded-3xl overflow-hidden bg-gradient-to-br from-[#0b031c] via-[#160633] to-[#080214] border border-purple-500/30 dark:border-purple-500/40 shadow-xl shadow-purple-950/20 transition-all duration-300"
       >
         {/* Banner Images Slides */}
         {activeBanners.map((banner, index) => {

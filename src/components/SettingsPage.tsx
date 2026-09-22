@@ -11,6 +11,9 @@ import {
   Calendar,
   Copy,
   Check,
+  LifeBuoy,
+  ChevronLeft,
+  MessageSquareWarning,
 } from 'lucide-react';
 import { CustomerUser, MerchantInfo } from '../types';
 import { isUserAdmin } from '../utils/adminUtils';
@@ -28,12 +31,14 @@ interface SettingsPageProps {
   onRefreshMerchant?: () => void;
   isLoadingMerchant?: boolean;
   onOpenAdmin?: () => void;
+  onOpenSupport?: () => void;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = React.memo(({
   currentUser,
   onOpenAuth,
   onLogout,
+  onOpenSupport,
 }) => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
@@ -245,6 +250,43 @@ export const SettingsPage: React.FC<SettingsPageProps> = React.memo(({
             </div>
           </div>
         )}
+
+        {/* 5. SUPPORT & REPORT PROBLEM SECTION (AVAILABLE FOR BOTH LOGGED IN & GUEST USERS) */}
+        <div className="pt-6 border-t border-gray-100 dark:border-white/10 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+              مركز المساعدة وخدمة العملاء
+            </span>
+            <span className="text-[10px] font-black text-[#7F00FF] dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 px-2.5 py-0.5 rounded-full border border-purple-200 dark:border-purple-800/40">
+              دعم فني ومتابعة مباشرة
+            </span>
+          </div>
+
+          <button
+            type="button"
+            id="settings-report-problem-btn"
+            onClick={onOpenSupport}
+            className="w-full p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-purple-50 via-slate-50 to-purple-50/50 dark:from-purple-950/30 dark:via-slate-900/60 dark:to-purple-950/30 hover:border-purple-300 dark:hover:border-purple-700/60 border border-purple-100 dark:border-purple-900/40 transition-all flex items-center justify-between cursor-pointer group shadow-xs active:scale-[0.99]"
+          >
+            <div className="flex items-center gap-3.5 text-right">
+              <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-[#7F00FF] text-white flex items-center justify-center shadow-md shadow-[#7F00FF]/25 shrink-0 group-hover:scale-105 transition-transform">
+                <LifeBuoy className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white group-hover:text-[#7F00FF] dark:group-hover:text-purple-300 transition-colors flex items-center gap-1.5">
+                  <span>الدعم الفني المباشر والإبلاغ عن مشكلة</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                </h4>
+                <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                  محادثة مباشرة مع فريق الدعم لحل أي مشكلة في طلب أو رصيد أو تقديم استفسار فوراً
+                </p>
+              </div>
+            </div>
+            <div className="w-8 h-8 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 text-slate-400 group-hover:text-[#7F00FF] group-hover:border-[#7F00FF]/40 flex items-center justify-center shrink-0 transition-colors mr-2">
+              <ChevronLeft className="w-4 h-4" />
+            </div>
+          </button>
+        </div>
       </div>
     </div>
   );

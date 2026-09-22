@@ -48,11 +48,11 @@ export const InsufficientBalanceModal: React.FC<InsufficientBalanceModalProps> =
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/70 backdrop-blur-xs animate-fadeIn select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-xs animate-fadeIn select-none"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-md bg-white dark:bg-[#131728] rounded-3xl border border-red-200 dark:border-red-900/50 shadow-2xl shadow-red-950/20 overflow-hidden transform transition-all duration-300 animate-scaleUp"
+        className="relative w-full max-w-md max-h-[92dvh] overflow-y-auto bg-white dark:bg-[#131728] rounded-2xl sm:rounded-3xl border border-red-200 dark:border-red-900/50 shadow-2xl shadow-red-950/20 transform transition-all duration-300 animate-scaleUp"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Gradient Banner with Warning Badge */}

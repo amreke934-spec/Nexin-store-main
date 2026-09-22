@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  KeyRound, 
+  Lock, 
+  Unlock, 
   Mail, 
   Clock, 
   RotateCcw, 
   CheckCircle2, 
   AlertCircle, 
-  ArrowRight,
   ShieldCheck,
-  Send
+  ArrowRight
 } from 'lucide-react';
 import { CustomerUser, OrderItem } from '../types';
 import { verifyEmailOtp, resendEmailOtp } from '../services/dbApi';
@@ -26,18 +26,52 @@ export const OtpVerificationCard: React.FC<OtpVerificationCardProps> = ({
   onBack,
   initialMessage,
 }) => {
-  const [otpCode, setOtpCode] = useState('');
+  // 6 individual digit inputs
+  const [digits, setDigits] = useState<string[]>(['', '', '', '', '', '']);
   const [expirySeconds, setExpirySeconds] = useState(600); // 10 minutes
   const [resendCooldown, setResendCooldown] = useState(45); // 45 seconds
   const [isLoading, setIsLoading] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState(initialMessage || '');
-  const inputRef = useRef<HTMLInputElement>(null);
+  
+  // Animation state for dynamic lock: 'idle' | 'shake' | 'unlock'
+  const [lockStatus, setLockStatus] = useState<'idle' | 'shake' | 'unlock'>('idle');
 
-  // Focus input automatically on mount
+  // Virtual keyboard awareness state
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+
+  // References to the 6 input elements
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Focus the first empty input on mount
   useEffect(() => {
-    inputRef.current?.focus();
+    inputRefs.current[0]?.focus();
+  }, []);
+
+  // Detect virtual keyboard via window resize / visualViewport
+  useEffect(() => {
+    const handleViewportResize = () => {
+      if (window.visualViewport) {
+        // If the visual viewport height is noticeably smaller than screen height (typical of soft keyboard)
+        const viewportHeight = window.visualViewport.height;
+        const windowHeight = window.innerHeight;
+        // If viewport shrunk by > 140px or is less than 520px high, keyboard is up
+        setIsKeyboardOpen(viewportHeight < 520 || (windowHeight - viewportHeight > 140));
+      }
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleViewportResize);
+      window.visualViewport.addEventListener('scroll', handleViewportResize);
+    }
+
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleViewportResize);
+        window.visualViewport.removeEventListener('scroll', handleViewportResize);
+      }
+    };
   }, []);
 
   // Expiry countdown timer (10 mins)
@@ -64,39 +98,130 @@ export const OtpVerificationCard: React.FC<OtpVerificationCardProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setSuccessMessage('');
+  const currentCode = digits.join('');
 
-    const cleanCode = otpCode.trim().replace(/\s+/g, '');
-    if (!cleanCode || cleanCode.length < 6) {
-      setError('يرجى إدخال رمز التحقق المكون من 6 أرقام');
-      return;
-    }
+  // Auto-verify when 6 digits are completely entered
+  const submitVerification = async (codeToVerify: string) => {
+    if (codeToVerify.length < 6 || isLoading) return;
 
     if (expirySeconds <= 0) {
-      setError('انتهت صلاحية رمز التحقق. اضغط على "إعادة إرسال الرمز" لاستلام رمز جديد.');
+      setError('انتهت صلاحية رمز التحقق. اضغط على إعادة إرسال الرمز لاستلام رمز جديد.');
+      setLockStatus('shake');
+      setTimeout(() => setLockStatus('idle'), 600);
       return;
     }
 
+    setError('');
+    setSuccessMessage('');
     setIsLoading(true);
 
     try {
-      const res = await verifyEmailOtp(email, cleanCode);
+      const res = await verifyEmailOtp(email, codeToVerify);
       if (res.success && res.user) {
         setIsLoading(false);
+        setLockStatus('unlock');
         setSuccessMessage('تم تأكيد الحساب بنجاح! جاري تسجيل الدخول...');
         setTimeout(() => {
           onSuccess(res.user!, res.orders);
-        }, 400);
+        }, 700);
       } else {
         setIsLoading(false);
+        setLockStatus('shake');
         setError(res.error || 'رمز التحقق غير صحيح أو منتهي الصلاحية');
+        setTimeout(() => setLockStatus('idle'), 600);
       }
     } catch (err: any) {
       setIsLoading(false);
+      setLockStatus('shake');
       setError(err.message || 'حدث خطأ أثناء تأكيد رمز التحقق');
+      setTimeout(() => setLockStatus('idle'), 600);
+    }
+  };
+
+  const handleVerify = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitVerification(currentCode);
+  };
+
+  // Handle individual digit input change
+  const handleDigitChange = (index: number, value: string) => {
+    const cleanNumbers = value.replace(/[^0-9]/g, '');
+    
+    if (cleanNumbers.length > 1) {
+      // User pasted or typed multiple digits
+      const newDigits = [...digits];
+      const chars = cleanNumbers.slice(0, 6).split('');
+      chars.forEach((char, i) => {
+        if (index + i < 6) {
+          newDigits[index + i] = char;
+        }
+      });
+      setDigits(newDigits);
+      const nextFocus = Math.min(index + chars.length, 5);
+      inputRefs.current[nextFocus]?.focus();
+
+      const assembled = newDigits.join('');
+      if (assembled.length === 6) {
+        submitVerification(assembled);
+      }
+      return;
+    }
+
+    const singleDigit = cleanNumbers.slice(-1);
+    const newDigits = [...digits];
+    newDigits[index] = singleDigit;
+    setDigits(newDigits);
+
+    // If a digit was entered, shift focus to next input
+    if (singleDigit && index < 5) {
+      inputRefs.current[index + 1]?.focus();
+    }
+
+    const assembled = newDigits.join('');
+    if (assembled.length === 6) {
+      submitVerification(assembled);
+    }
+  };
+
+  // Handle Backspace and arrow keys
+  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace') {
+      if (!digits[index] && index > 0) {
+        // Current is already empty, move to previous and clear it
+        const newDigits = [...digits];
+        newDigits[index - 1] = '';
+        setDigits(newDigits);
+        inputRefs.current[index - 1]?.focus();
+      } else {
+        // Clear current
+        const newDigits = [...digits];
+        newDigits[index] = '';
+        setDigits(newDigits);
+      }
+    } else if (e.key === 'ArrowLeft') {
+      if (index < 5) inputRefs.current[index + 1]?.focus();
+    } else if (e.key === 'ArrowRight') {
+      if (index > 0) inputRefs.current[index - 1]?.focus();
+    }
+  };
+
+  // Handle clipboard paste
+  const handlePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData('text').replace(/[^0-9]/g, '').slice(0, 6);
+    if (!pastedData) return;
+
+    const newDigits = [...digits];
+    for (let i = 0; i < 6; i++) {
+      newDigits[i] = pastedData[i] || '';
+    }
+    setDigits(newDigits);
+
+    const focusIdx = Math.min(pastedData.length, 5);
+    inputRefs.current[focusIdx]?.focus();
+
+    if (pastedData.length === 6) {
+      submitVerification(pastedData);
     }
   };
 
@@ -109,9 +234,11 @@ export const OtpVerificationCard: React.FC<OtpVerificationCardProps> = ({
     try {
       const res = await resendEmailOtp(email);
       if (res.success) {
-        setSuccessMessage(res.message || 'تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني بنجاح');
+        setSuccessMessage(res.message || 'تم إرسال رمز تحقق جديد بنجاح');
         setResendCooldown(res.cooldownSeconds || 45);
-        setExpirySeconds(600); // Reset to 10 minutes
+        setExpirySeconds(600);
+        setDigits(['', '', '', '', '', '']);
+        inputRefs.current[0]?.focus();
       } else {
         setError(res.error || 'تعذر إعادة إرسال الرمز، يرجى المحاولة بعد قليل');
         if (res.cooldownSeconds) {
@@ -126,110 +253,138 @@ export const OtpVerificationCard: React.FC<OtpVerificationCardProps> = ({
   };
 
   return (
-    <div className="space-y-5 animate-in fade-in duration-200">
-      {/* Header section */}
-      <div className="text-center space-y-2">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-purple-50 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800/60 text-[#7F00FF] dark:text-purple-300 shadow-sm mx-auto">
-          <KeyRound className="w-8 h-8" />
-        </div>
+    <div className={`w-full flex flex-col items-center justify-center transition-all duration-300 ${
+      isKeyboardOpen ? 'space-y-1.5 py-0' : 'space-y-2.5 sm:space-y-3.5 py-0.5'
+    }`}>
+      
+      {/* 1. Dynamic Interactive Animated Lock Icon (scales smoothly when keyboard is open) */}
+      <div className="flex justify-center items-center">
+        <div 
+          className={`relative flex items-center justify-center transition-all duration-300 rounded-full ${
+            isKeyboardOpen 
+              ? 'w-10 h-10 sm:w-12 sm:h-12' 
+              : 'w-13 h-13 sm:w-16 sm:h-16'
+          } ${
+            lockStatus === 'unlock'
+              ? 'bg-emerald-500/15 border-2 border-emerald-500 text-emerald-400 animate-glow-success scale-105'
+              : lockStatus === 'shake'
+              ? 'bg-red-500/15 border-2 border-red-500 text-red-400 animate-shake-lock'
+              : 'bg-purple-950/40 border-2 border-purple-500/40 text-[#A855F7] shadow-md shadow-purple-900/30'
+          }`}
+        >
+          {/* Subtle radiating aura */}
+          <div className={`absolute inset-0 rounded-full blur-xs opacity-40 transition-colors ${
+            lockStatus === 'unlock' ? 'bg-emerald-500' : lockStatus === 'shake' ? 'bg-red-500' : 'bg-[#7F00FF]'
+          }`} />
 
-        <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+          {lockStatus === 'unlock' ? (
+            <Unlock className={`${isKeyboardOpen ? 'w-5 h-5' : 'w-6 h-6 sm:w-8 sm:h-8'} text-emerald-400 relative z-10 transition-transform duration-300 rotate-[-10deg]` } />
+          ) : (
+            <Lock className={`${isKeyboardOpen ? 'w-5 h-5' : 'w-6 h-6 sm:w-7 sm:h-7'} relative z-10 transition-transform duration-200 ${
+              lockStatus === 'shake' ? 'text-red-400' : 'text-[#C084FC]'
+            }`} />
+          )}
+        </div>
+      </div>
+
+      {/* 2. Simplified Clean Titles & Email Display */}
+      <div className={`text-center transition-all duration-200 w-full ${isKeyboardOpen ? 'space-y-0.5' : 'space-y-1'}`}>
+        <h2 className={`font-black text-white tracking-tight transition-all duration-200 ${
+          isKeyboardOpen ? 'text-xs sm:text-sm' : 'text-sm sm:text-lg'
+        }`}>
           تأكيد البريد الإلكتروني
         </h2>
 
-        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-          أدخل رمز التحقق المكون من 6 أرقام المرسل إلى:
-        </p>
-
-        {/* Target email badge */}
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-purple-50/90 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800/50 text-xs font-mono font-bold text-purple-700 dark:text-purple-300 dir-ltr max-w-full truncate">
-          <Mail className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">{email}</span>
-        </div>
-
-        {/* Sender verification reassurance */}
-        <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-center gap-1.5 pt-0.5">
-          <span>المرسل المعتمد:</span>
-          <strong className="font-mono text-purple-600 dark:text-purple-400 dir-ltr font-bold">
-            no-reply@nexin-store.top
-          </strong>
+        {/* Clean Email Display */}
+        <div className="flex items-center justify-center gap-1.5 text-[11px] sm:text-xs text-slate-300 font-mono dir-ltr py-0">
+          <Mail className="w-3 h-3 text-purple-400 shrink-0" />
+          <span className="font-semibold text-purple-200 truncate max-w-[240px] sm:max-w-xs">{email}</span>
         </div>
       </div>
 
-      {/* Expiry Countdown Card */}
-      <div className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-between transition-colors ${
-        expirySeconds <= 120
-          ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200'
-          : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-      }`}>
-        <div className="flex items-center gap-2">
-          <Clock className={`w-4 h-4 shrink-0 ${expirySeconds <= 120 ? 'text-amber-600' : 'text-[#7F00FF]'}`} />
-          <span>صلاحية رمز التحقق:</span>
+      {/* 3. 6 Separate Outline / Ghost Input Boxes - responsive dimensions */}
+      <form onSubmit={handleVerify} className={`w-full transition-all duration-200 ${isKeyboardOpen ? 'space-y-2' : 'space-y-2.5 sm:space-y-3'}`}>
+        <div 
+          className="flex items-center justify-center gap-1.5 sm:gap-2.5 dir-ltr py-0.5"
+          onPaste={handlePaste}
+        >
+          {digits.map((digit, idx) => {
+            const isSuccess = lockStatus === 'unlock';
+            const isError = lockStatus === 'shake';
+
+            return (
+              <input
+                key={idx}
+                ref={(el) => { inputRefs.current[idx] = el; }}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={1}
+                autoComplete="one-time-code"
+                value={digit}
+                onFocus={() => setIsKeyboardOpen(true)}
+                onBlur={() => {
+                  // Wait briefly before clearing keyboard state in case of moving between inputs
+                  setTimeout(() => {
+                    if (!document.activeElement || document.activeElement.tagName !== 'INPUT') {
+                      setIsKeyboardOpen(false);
+                    }
+                  }, 120);
+                }}
+                onChange={(e) => handleDigitChange(idx, e.target.value)}
+                onKeyDown={(e) => handleKeyDown(idx, e)}
+                className={`text-center font-mono font-black rounded-xl transition-all duration-150 select-none outline-none ${
+                  isKeyboardOpen
+                    ? 'w-9 h-10 sm:w-11 sm:h-12 text-base sm:text-lg'
+                    : 'w-10 h-11 sm:w-13 sm:h-14 text-lg sm:text-2xl'
+                } ${
+                  isSuccess
+                    ? 'bg-emerald-950/30 border-2 border-emerald-500 text-emerald-300 shadow-[0_0_12px_rgba(34,197,94,0.35)]'
+                    : isError
+                    ? 'bg-red-950/30 border-2 border-red-500 text-red-300 shadow-[0_0_12px_rgba(239,68,68,0.35)]'
+                    : digit
+                    ? 'bg-[#141224] border-2 border-purple-500/70 text-white shadow-[0_0_10px_rgba(127,0,255,0.25)]'
+                    : 'bg-[#0E0C18]/80 border border-purple-900/50 hover:border-purple-600/60 text-white placeholder-slate-600'
+                } focus:border-[#A855F7] focus:ring-2 focus:ring-[#7F00FF]/25 focus:shadow-[0_0_15px_rgba(168,85,247,0.5)]`}
+              />
+            );
+          })}
         </div>
-        <span className="font-mono font-bold text-sm dir-ltr">
-          {formatTime(expirySeconds)}
-        </span>
-      </div>
 
-      {/* Code Input Form */}
-      <form onSubmit={handleVerify} className="space-y-4">
-        <div className="space-y-2">
-          <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 text-center">
-            رمز التحقق (OTP)
-          </label>
-
-          <div className="relative">
-            <input
-              ref={inputRef}
-              id="otp-verification-input"
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              autoComplete="one-time-code"
-              placeholder="000000"
-              value={otpCode}
-              onChange={(e) => {
-                const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
-                setOtpCode(val);
-              }}
-              className="w-full py-3.5 px-4 text-center bg-slate-50 dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-800 focus:border-[#7F00FF] focus:ring-4 focus:ring-[#7F00FF]/15 rounded-2xl text-2xl sm:text-3xl font-black font-mono tracking-widest text-slate-900 dark:text-white transition-all placeholder:text-slate-300 dark:placeholder:text-slate-700"
-            />
-          </div>
-
-          {/* SPECIFICATION MANDATORY HELPER NOTE */}
-          <div className="p-3 bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/40 rounded-xl text-center">
-            <p className="text-xs font-medium text-amber-900 dark:text-amber-200 leading-relaxed">
-              يرجى التحقق من مجلد الرسائل غير المرغوب بها (Spam / Junk) إذا لم يصلك الرمز.
-            </p>
-          </div>
-        </div>
-
-        {/* Error Feedback */}
+        {/* Dynamic Error / Success Messages */}
         {error && (
-          <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-300 text-xs font-semibold flex items-center gap-2 animate-in fade-in duration-200">
-            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-            <span>{error}</span>
+          <div className="p-1.5 rounded-lg bg-red-950/50 border border-red-800/60 text-red-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 animate-in fade-in duration-150">
+            <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+            <span className="text-center">{error}</span>
           </div>
         )}
 
-        {/* Success Feedback */}
         {successMessage && (
-          <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2 animate-in fade-in duration-200">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span>{successMessage}</span>
+          <div className="p-1.5 rounded-lg bg-emerald-950/50 border border-emerald-800/60 text-emerald-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 animate-in fade-in duration-150">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span className="text-center">{successMessage}</span>
           </div>
         )}
 
-        {/* Submit button */}
+        {/* 4. Elevated Vibrant Purple Confirmation Button - stays prominent */}
         <button
           id="verify-submit-button"
           type="submit"
-          disabled={isLoading || otpCode.length < 6 || expirySeconds <= 0}
-          className="w-full bg-[#7F00FF] hover:bg-[#6b00d6] active:scale-98 text-white font-bold py-3.5 px-6 rounded-2xl text-sm transition-all shadow-lg shadow-[#7F00FF]/25 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+          disabled={isLoading || currentCode.length < 6 || expirySeconds <= 0}
+          className={`w-full bg-[#7F00FF] hover:bg-[#6e00de] active:scale-98 text-white font-bold rounded-xl transition-all shadow-md shadow-[#7F00FF]/30 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 border-t border-purple-400/30 ${
+            isKeyboardOpen ? 'py-2 px-3 text-xs' : 'py-2.5 sm:py-3 px-4 text-xs sm:text-sm'
+          }`}
         >
           {isLoading ? (
-            <span>جاري التحقق وتفعيل الحساب...</span>
+            <span className="inline-flex items-center gap-2">
+              <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              جاري تفعيل الحساب...
+            </span>
+          ) : lockStatus === 'unlock' ? (
+            <span className="inline-flex items-center gap-1.5 text-emerald-100">
+              <CheckCircle2 className="w-4 h-4" />
+              تم التفعيل بنجاح
+            </span>
           ) : (
             <>
               <CheckCircle2 className="w-4 h-4" />
@@ -239,36 +394,48 @@ export const OtpVerificationCard: React.FC<OtpVerificationCardProps> = ({
         </button>
       </form>
 
-      {/* Action Footer: Resend & Edit Email */}
-      <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
-        <button
-          type="button"
-          id="resend-otp-button"
-          onClick={handleResend}
-          disabled={resendCooldown > 0 || isResending}
-          className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-            resendCooldown > 0 || isResending
-              ? 'bg-slate-100 dark:bg-slate-900 text-slate-400 dark:text-slate-500 cursor-not-allowed'
-              : 'bg-purple-50 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/50 text-[#7F00FF] dark:text-purple-300 border border-purple-200 dark:border-purple-800/40 cursor-pointer'
-          }`}
-        >
-          <RotateCcw className={`w-3.5 h-3.5 ${isResending ? 'animate-spin' : ''}`} />
+      {/* 5. Simplified Resend & Return Controls */}
+      <div className={`w-full transition-all duration-200 ${isKeyboardOpen ? 'space-y-1 pt-0' : 'space-y-1.5 pt-0.5'}`}>
+        {/* Resend description text */}
+        <div className="flex items-center justify-center gap-1.5 text-[10.5px] sm:text-[11px] text-slate-400">
+          <span>إعادة إرسال الرمز، يرجى</span>
           {resendCooldown > 0 ? (
-            <span>إعادة إرسال الرمز بعد ({resendCooldown} ثانية)</span>
+            <span className="text-purple-400 font-mono font-bold">
+              الانتظار ({resendCooldown}ث)
+            </span>
           ) : (
-            <span>إعادة إرسال الرمز الآن</span>
+            <button
+              type="button"
+              id="resend-otp-button"
+              onClick={handleResend}
+              disabled={isResending}
+              className="text-[#A855F7] hover:text-purple-300 font-bold underline decoration-purple-500/50 hover:decoration-purple-400 cursor-pointer transition-colors"
+            >
+              {isResending ? 'جاري الإرسال...' : 'الضغط هنا'}
+            </button>
           )}
-        </button>
+        </div>
 
-        <button
-          type="button"
-          id="otp-back-button"
-          onClick={onBack}
-          className="w-full py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer text-center"
-        >
-          تعديل البريد الإلكتروني أو العودة
-        </button>
+        {/* Change email / Back button */}
+        <div className="text-center">
+          <button
+            type="button"
+            id="otp-back-button"
+            onClick={onBack}
+            className="text-[10.5px] sm:text-[11px] font-semibold text-slate-400 hover:text-slate-200 transition-colors cursor-pointer inline-flex items-center gap-1"
+          >
+            <span>تعديل البريد الإلكتروني</span>
+            <ArrowRight className="w-3 h-3 text-purple-400 rotate-180" />
+          </button>
+        </div>
       </div>
+
+      {/* 6. Discreet Security & Encryption Footer Tag */}
+      <div className="w-full pt-1.5 border-t border-purple-900/30 flex items-center justify-center gap-1 text-[10px] sm:text-[10.5px] text-slate-400">
+        <ShieldCheck className="w-3 h-3 text-emerald-400" />
+        <span>تشفير وحماية البيانات</span>
+      </div>
+
     </div>
   );
 };

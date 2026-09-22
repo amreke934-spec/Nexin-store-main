@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, startTransition } from 'react';
 import { MerchantInfo, Product, CustomerUser, OrderItem, OrderOptions, StoreBanner } from './types';
 import { fetchMerchantInfo, fetchProducts } from './services/scStoreApi';
-import { fetchUserOrdersFromDb, fetchStoreSetting, saveStoreSetting, fetchUserProfile } from './services/dbApi';
+import { fetchUserOrdersFromDb, fetchStoreSetting, saveStoreSetting, fetchUserProfile, clearUserOrdersInDb } from './services/dbApi';
 import { setExchangeRate } from './utils/currencyUtils';
 import { setProfitMarginConfig, ProfitMarginConfig } from './utils/profitUtils';
 import { getSavedBanners, saveBannersLocally } from './data/defaultBanners';
@@ -23,6 +23,7 @@ import { DepositPage } from './components/DepositPage';
 import { PullToRefresh } from './components/PullToRefresh';
 import { MaintenanceScreen } from './components/MaintenanceScreen';
 import { GuestAccessModal } from './components/GuestAccessModal';
+import { SupportPage } from './components/SupportPage';
 import { MaintenanceSettings } from './types';
 import { isUserAdmin, DEFAULT_MAINTENANCE_SETTINGS } from './utils/adminUtils';
 
@@ -39,10 +40,10 @@ export default function App() {
 
   // Maintenance Mode state
   const [maintenanceSettings, setMaintenanceSettings] = useState<MaintenanceSettings>(DEFAULT_MAINTENANCE_SETTINGS);
-  const [adminInitialTab, setAdminInitialTab] = useState<'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance'>('stats');
+  const [adminInitialTab, setAdminInitialTab] = useState<'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance' | 'tickets'>('stats');
 
-  // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track' | 'about' | 'checkout' | 'deposit'
-  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track' | 'about' | 'checkout' | 'deposit'>('products');
+  // Navigation & View state: 'products' | 'orders' | 'settings' | 'auth' | 'admin' | 'track' | 'about' | 'checkout' | 'deposit' | 'support'
+  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'track' | 'about' | 'checkout' | 'deposit' | 'support'>('products');
   const [trackingOrderId, setTrackingOrderId] = useState<string>('');
 
   // Theme state (Dark / Light Mode) initialized from storage or system preference
@@ -118,6 +119,64 @@ export default function App() {
   // Profit Margin Version for immediate storefront price reactivity
   const [profitMarginVersion, setProfitMarginVersion] = useState(0);
 
+  // Virtual keyboard awareness for mobile devices
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+
+  useEffect(() => {
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+        if (window.innerWidth <= 768) {
+          setIsKeyboardOpen(true);
+          setTimeout(() => {
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 300);
+        }
+      }
+    };
+
+    const handleFocusOut = () => {
+      setTimeout(() => {
+        const activeEl = document.activeElement;
+        if (!activeEl || (activeEl.tagName !== 'INPUT' && activeEl.tagName !== 'TEXTAREA' && activeEl.tagName !== 'SELECT')) {
+          setIsKeyboardOpen(false);
+        }
+      }, 100);
+    };
+
+    const handleViewportResize = () => {
+      if (window.visualViewport) {
+        const heightRatio = window.visualViewport.height / window.innerHeight;
+        if (heightRatio < 0.78 && window.innerWidth <= 768) {
+          setIsKeyboardOpen(true);
+        } else if (heightRatio >= 0.88) {
+          const activeEl = document.activeElement;
+          if (!activeEl || (activeEl.tagName !== 'INPUT' && activeEl.tagName !== 'TEXTAREA')) {
+            setIsKeyboardOpen(false);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('focusin', handleFocusIn);
+    document.addEventListener('focusout', handleFocusOut);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleViewportResize);
+    }
+
+    return () => {
+      document.removeEventListener('focusin', handleFocusIn);
+      document.removeEventListener('focusout', handleFocusOut);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleViewportResize);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle('keyboard-open', isKeyboardOpen);
+  }, [isKeyboardOpen]);
+
   useEffect(() => {
     const onProfitChanged = () => {
       setProfitMarginVersion((v) => v + 1);
@@ -164,6 +223,23 @@ export default function App() {
       }
     } catch (e) {
       console.warn('Error refreshing user orders from DB:', e);
+    }
+  }, []);
+
+  // Function to clear user orders history
+  const handleClearOrders = useCallback(async () => {
+    setOrders([]);
+    try {
+      localStorage.removeItem('nexen_orders_history');
+    } catch (e) {
+      console.warn('Error removing local orders history:', e);
+    }
+    const uid = currentUserRef.current?.id;
+    const email = currentUserRef.current?.email;
+    try {
+      await clearUserOrdersInDb(uid, email);
+    } catch (e) {
+      console.warn('Error clearing orders from DB:', e);
     }
   }, []);
 
@@ -476,7 +552,12 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  const handleNavigateAdmin = useCallback((targetTab?: 'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance') => {
+  const handleNavigateSupport = useCallback(() => {
+    setActiveTab('support');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const handleNavigateAdmin = useCallback((targetTab?: 'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance' | 'tickets') => {
     if (targetTab) {
       setAdminInitialTab(targetTab);
     }
@@ -595,144 +676,162 @@ export default function App() {
         isMaintenanceActive={isMaintenanceActive}
       />
 
-      {/* Pull To Refresh Wrapped Main Content */}
-      <PullToRefresh onRefresh={handlePullRefresh}>
-        {/* Main Content Area */}
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-8 py-6 sm:py-8 pb-28 sm:pb-32 min-h-[calc(100vh-140px)]">
-          {activeTab === 'products' ? (
-            isLockedForCurrentUser ? (
-              <MaintenanceScreen
-                settings={maintenanceSettings}
-                currentUser={currentUser}
-              />
-            ) : (
-              <ProductGrid
-                key={`products-grid-${profitMarginVersion}`}
-                products={products}
-                isLoading={isLoadingProducts}
-                error={productsError}
-                onRefresh={loadProductsData}
-                onSelectProduct={handleSelectProduct}
-                banners={banners}
-                onOpenBannerManager={handleOpenBannerManager}
-                currentUser={currentUser}
-                onOpenAuth={handleOpenAuth}
-              />
-            )
-          ) : activeTab === 'orders' || activeTab === 'track' ? (
-            isLockedForCurrentUser ? (
-              <MaintenanceScreen
-                settings={maintenanceSettings}
-                currentUser={currentUser}
-              />
-            ) : (
-              <OrdersHistoryPage
-                currentUser={currentUser}
-                orders={orders}
-                onRefreshOrders={refreshUserOrders}
-                onNavigateHome={handleNavigateHome}
-                onOpenAuth={handleOpenAuth}
-                initialQuery={trackingOrderId}
-              />
-            )
-          ) : activeTab === 'about' ? (
-            <AboutPage
-              onNavigateHome={handleNavigateHome}
-            />
-          ) : activeTab === 'settings' ? (
-            <SettingsPage
-              currentUser={currentUser}
-              merchantInfo={merchantInfo}
-              theme={theme}
-              onToggleTheme={handleToggleTheme}
-              onOpenAuth={handleOpenAuth}
-              onLogout={handleLogout}
-              onDeleteAccount={handleDeleteAccount}
-              onNavigateHome={handleNavigateHome}
-              onNavigateOrders={handleNavigateOrders}
-              onRefreshMerchant={loadMerchantData}
-              isLoadingMerchant={isLoadingMerchant}
-              onOpenAdmin={handleNavigateAdmin}
-            />
-          ) : activeTab === 'admin' ? (
-            <AdminDashboard
-              currentUser={currentUser}
-              merchantInfo={merchantInfo}
-              onRefreshMerchant={loadMerchantData}
-              isLoadingMerchant={isLoadingMerchant}
-              onOpenBannerManager={handleOpenBannerManager}
-              onRefreshProducts={loadProductsData}
-              onNavigateHome={handleNavigateHome}
-              onNavigateSettings={handleNavigateSettings}
-              initialTab={adminInitialTab}
-              onMaintenanceChange={(updated) => setMaintenanceSettings(updated)}
-            />
-          ) : activeTab === 'auth' ? (
-            <AuthPage
-              onLoginSuccess={handleLoginSuccess}
-              onBackToStore={handleNavigateHome}
-              pendingProduct={pendingProductForAuth}
-              initialMode={authMode}
-              theme={theme}
-            />
-          ) : activeTab === 'deposit' ? (
-            isLockedForCurrentUser ? (
-              <MaintenanceScreen
-                settings={maintenanceSettings}
-                currentUser={currentUser}
-              />
-            ) : (
-              <DepositPage
-                currentUser={currentUser}
-                onNavigateHome={handleNavigateHome}
-                onOpenAuth={handleOpenAuth}
-                onDepositSuccess={handleDepositSuccess}
-                onRefreshUser={() => {
-                  if (currentUser?.email || currentUser?.id) {
-                    fetchUserProfile(currentUser.email || currentUser.id).then((updated) => {
-                      if (updated) setCurrentUser(updated);
-                    });
-                  }
-                }}
-              />
-            )
-          ) : activeTab === 'checkout' && selectedProductForOrder && !isLockedForCurrentUser ? (
-            <CheckoutPage
-              product={selectedProductForOrder}
-              currentUser={currentUser}
-              orderOptions={selectedOrderOptions}
-              onBack={handleNavigateHome}
-              onOrderSuccess={handleOrderSuccess}
-              onNavigateToTracking={handleNavigateToTracking}
-              onNavigateHome={handleNavigateHome}
-              onNavigateAdmin={(tab) => handleNavigateAdmin(tab as any)}
-              onNavigateDeposit={handleNavigateDeposit}
-              onOpenAuth={handleOpenAuth}
-            />
-          ) : isLockedForCurrentUser ? (
-            <MaintenanceScreen
-              settings={maintenanceSettings}
-              currentUser={currentUser}
-            />
-          ) : null}
+      {/* Main Content: Full Screen for Support Page, otherwise Pull To Refresh */}
+      {activeTab === 'support' ? (
+        <main className="w-full flex-1 h-[calc(100dvh-56px)] sm:h-[calc(100dvh-64px)] overflow-hidden flex flex-col p-0 m-0">
+          <SupportPage
+            currentUser={currentUser}
+            onBack={handleNavigateSettings}
+          />
         </main>
-      </PullToRefresh>
+      ) : (
+        <PullToRefresh onRefresh={handlePullRefresh} disabled={activeTab === 'auth'}>
+          {/* Main Content Area */}
+          <main className={`flex-1 max-w-7xl w-full mx-auto ${
+            activeTab === 'auth'
+              ? `px-2 sm:px-6 py-1 sm:py-6 ${isKeyboardOpen ? 'pb-80' : 'pb-20 sm:pb-28'} flex flex-col items-center justify-start min-h-[calc(100dvh-80px)]`
+              : 'px-3 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 pb-28 sm:pb-32 min-h-[calc(100dvh-130px)]'
+          }`}>
+            {activeTab === 'products' ? (
+              isLockedForCurrentUser ? (
+                <MaintenanceScreen
+                  settings={maintenanceSettings}
+                  currentUser={currentUser}
+                />
+              ) : (
+                <ProductGrid
+                  key={`products-grid-${profitMarginVersion}`}
+                  products={products}
+                  isLoading={isLoadingProducts}
+                  error={productsError}
+                  onRefresh={loadProductsData}
+                  onSelectProduct={handleSelectProduct}
+                  banners={banners}
+                  onOpenBannerManager={handleOpenBannerManager}
+                  currentUser={currentUser}
+                  onOpenAuth={handleOpenAuth}
+                />
+              )
+            ) : activeTab === 'orders' || activeTab === 'track' ? (
+              isLockedForCurrentUser ? (
+                <MaintenanceScreen
+                  settings={maintenanceSettings}
+                  currentUser={currentUser}
+                />
+              ) : (
+                <OrdersHistoryPage
+                  currentUser={currentUser}
+                  orders={orders}
+                  onRefreshOrders={refreshUserOrders}
+                  onClearOrders={handleClearOrders}
+                  onNavigateHome={handleNavigateHome}
+                  onOpenAuth={handleOpenAuth}
+                  initialQuery={trackingOrderId}
+                />
+              )
+            ) : activeTab === 'about' ? (
+              <AboutPage
+                onNavigateHome={handleNavigateHome}
+              />
+            ) : activeTab === 'settings' ? (
+              <SettingsPage
+                currentUser={currentUser}
+                merchantInfo={merchantInfo}
+                theme={theme}
+                onToggleTheme={handleToggleTheme}
+                onOpenAuth={handleOpenAuth}
+                onLogout={handleLogout}
+                onDeleteAccount={handleDeleteAccount}
+                onNavigateHome={handleNavigateHome}
+                onNavigateOrders={handleNavigateOrders}
+                onRefreshMerchant={loadMerchantData}
+                isLoadingMerchant={isLoadingMerchant}
+                onOpenAdmin={handleNavigateAdmin}
+                onOpenSupport={handleNavigateSupport}
+              />
+            ) : activeTab === 'admin' ? (
+              <AdminDashboard
+                currentUser={currentUser}
+                merchantInfo={merchantInfo}
+                onRefreshMerchant={loadMerchantData}
+                isLoadingMerchant={isLoadingMerchant}
+                onOpenBannerManager={handleOpenBannerManager}
+                onRefreshProducts={loadProductsData}
+                onNavigateHome={handleNavigateHome}
+                onNavigateSettings={handleNavigateSettings}
+                initialTab={adminInitialTab}
+                onMaintenanceChange={(updated) => setMaintenanceSettings(updated)}
+              />
+            ) : activeTab === 'auth' ? (
+              <AuthPage
+                onLoginSuccess={handleLoginSuccess}
+                onBackToStore={handleNavigateHome}
+                pendingProduct={pendingProductForAuth}
+                initialMode={authMode}
+                theme={theme}
+              />
+            ) : activeTab === 'deposit' ? (
+              isLockedForCurrentUser ? (
+                <MaintenanceScreen
+                  settings={maintenanceSettings}
+                  currentUser={currentUser}
+                />
+              ) : (
+                <DepositPage
+                  currentUser={currentUser}
+                  onNavigateHome={handleNavigateHome}
+                  onOpenAuth={handleOpenAuth}
+                  onDepositSuccess={handleDepositSuccess}
+                  onRefreshUser={() => {
+                    if (currentUser?.email || currentUser?.id) {
+                      fetchUserProfile(currentUser.email || currentUser.id).then((updated) => {
+                        if (updated) setCurrentUser(updated);
+                      });
+                    }
+                  }}
+                />
+              )
+            ) : activeTab === 'checkout' && selectedProductForOrder && !isLockedForCurrentUser ? (
+              <CheckoutPage
+                product={selectedProductForOrder}
+                currentUser={currentUser}
+                orderOptions={selectedOrderOptions}
+                onBack={handleNavigateHome}
+                onOrderSuccess={handleOrderSuccess}
+                onNavigateToTracking={handleNavigateToTracking}
+                onNavigateHome={handleNavigateHome}
+                onNavigateAdmin={(tab) => handleNavigateAdmin(tab as any)}
+                onNavigateDeposit={handleNavigateDeposit}
+                onOpenAuth={handleOpenAuth}
+              />
+            ) : isLockedForCurrentUser ? (
+              <MaintenanceScreen
+                settings={maintenanceSettings}
+                currentUser={currentUser}
+              />
+            ) : null}
+          </main>
+        </PullToRefresh>
+      )}
 
       {/* Bottom Floating Navigation Bar (4-item layout: Home, Orders, Deposit, Account) */}
-      <BottomNav
-        activeTab={activeTab}
-        authMode={authMode}
-        onNavigateHome={handleNavigateHome}
-        onNavigateOrders={handleNavigateOrders}
-        onNavigateDeposit={handleNavigateDeposit}
-        onNavigateLogin={() => handleOpenAuth('login')}
-        onNavigateRegister={() => handleOpenAuth('register')}
-        onNavigateTrack={handleNavigateOrders}
-        onOpenSettings={handleNavigateSettings}
-        ordersCount={orders.length}
-        isLoggedIn={!!currentUser}
-        isMaintenanceLocked={isLockedForCurrentUser}
-      />
+      {activeTab !== 'support' && (
+        <BottomNav
+          activeTab={activeTab}
+          authMode={authMode}
+          onNavigateHome={handleNavigateHome}
+          onNavigateOrders={handleNavigateOrders}
+          onNavigateDeposit={handleNavigateDeposit}
+          onNavigateLogin={() => handleOpenAuth('login')}
+          onNavigateRegister={() => handleOpenAuth('register')}
+          onNavigateTrack={handleNavigateOrders}
+          onOpenSettings={handleNavigateSettings}
+          ordersCount={orders.length}
+          isLoggedIn={!!currentUser}
+          isMaintenanceLocked={isLockedForCurrentUser}
+          isKeyboardOpen={isKeyboardOpen}
+        />
+      )}
 
       {/* Banner Upload & Management Modal */}
       <BannerManagementModal
@@ -759,7 +858,9 @@ export default function App() {
       />
 
       {/* Floating 3-Dots Support & Social Media Action Widget */}
-      {!isSplashScreenVisible && <FloatingSupportWidget />}
+      {!isSplashScreenVisible && activeTab !== 'auth' && !isKeyboardOpen && (
+        <FloatingSupportWidget isKeyboardOpen={isKeyboardOpen} />
+      )}
     </div>
   );
 }

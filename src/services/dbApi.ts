@@ -1,4 +1,4 @@
-import { CustomerUser, OrderItem, DepositMethod, DepositRequest } from '../types';
+import { CustomerUser, OrderItem, DepositMethod, DepositRequest, SupportTicket } from '../types';
 
 export interface DbStatusResponse {
   connected: boolean;
@@ -238,6 +238,22 @@ export async function saveOrderToDb(order: OrderItem, userId?: string): Promise<
     return { success: res.ok, orderId: data.orderId };
   } catch {
     return { success: false };
+  }
+}
+
+/**
+ * Clear all orders for a user from Neon DB
+ */
+export async function clearUserOrdersInDb(userId?: string, email?: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/orders/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, email }),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 
@@ -696,4 +712,127 @@ export async function updateDepositRequestStatus(
     return { success: false, error: err.message || 'فشل الاتصال بالخادم' };
   }
 }
+
+/**
+ * Submit a new Support Ticket / Issue Report
+ */
+export async function createSupportTicket(payload: {
+  userId?: string | null;
+  userName: string;
+  userEmail: string;
+  userPhone?: string | null;
+  subject: string;
+  category?: string;
+  message: string;
+  priority?: string;
+}): Promise<{ success: boolean; ticket?: SupportTicket; message?: string; error?: string }> {
+  try {
+    const res = await fetch('/api/support/tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'فشل إرسال البلاغ' };
+    }
+    return data;
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل الاتصال بالخادم' };
+  }
+}
+
+/**
+ * Fetch Support Tickets (for customer or admin)
+ */
+export async function fetchSupportTickets(params?: {
+  userId?: string;
+  userEmail?: string;
+  isAdmin?: boolean;
+}): Promise<{ success: boolean; tickets: SupportTicket[]; error?: string }> {
+  try {
+    const query = new URLSearchParams();
+    if (params?.userId) query.set('userId', params.userId);
+    if (params?.userEmail) query.set('userEmail', params.userEmail);
+    if (params?.isAdmin) query.set('isAdmin', 'true');
+
+    const res = await fetch(`/api/support/tickets?${query.toString()}`);
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, tickets: [], error: data.error || 'فشل جلب البلاغات' };
+    }
+    return { success: true, tickets: data.tickets || [] };
+  } catch (err: any) {
+    return { success: false, tickets: [], error: err.message || 'فشل الاتصال بالخادم' };
+  }
+}
+
+/**
+ * Admin: Reply to a Support Ticket
+ */
+export async function replySupportTicket(
+  id: string,
+  adminReply: string,
+  status: string = 'resolved',
+  adminEmail?: string
+): Promise<{ success: boolean; ticket?: SupportTicket; message?: string; error?: string }> {
+  try {
+    const res = await fetch(`/api/support/tickets/${encodeURIComponent(id)}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adminReply, status, adminEmail }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'فشل إرسال الرد' };
+    }
+    return data;
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل الاتصال بالخادم' };
+  }
+}
+
+/**
+ * Admin: Update Support Ticket Status
+ */
+export async function updateSupportTicketStatus(
+  id: string,
+  status: string
+): Promise<{ success: boolean; ticket?: SupportTicket; error?: string }> {
+  try {
+    const res = await fetch(`/api/support/tickets/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'فشل تحديث الحالة' };
+    }
+    return data;
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل الاتصال بالخادم' };
+  }
+}
+
+/**
+ * Admin: Delete a Support Ticket
+ */
+export async function deleteSupportTicket(
+  id: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const res = await fetch(`/api/support/tickets/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'فشل حذف البلاغ' };
+    }
+    return data;
+  } catch (err: any) {
+    return { success: false, error: err.message || 'فشل الاتصال بالخادم' };
+  }
+}
+
 

@@ -37,6 +37,11 @@ html.no-transitions *::after {
     color-scheme: light dark;
     background-color: var(--app-bg);
     color: var(--app-text);
+    /* Fluid, responsive base root font scale using clamp */
+    font-size: clamp(14px, 0.9rem + 0.25vw, 16px);
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    touch-action: pan-x pan-y;
   }
 
   html.dark {
@@ -48,8 +53,16 @@ html.no-transitions *::after {
     color: var(--app-text);
     background-color: var(--app-bg);
     overflow-x: hidden;
+    touch-action: pan-x pan-y;
     width: 100%;
     max-width: 100vw;
+    min-height: 100vh;
+    min-height: 100dvh;
+    /* Respect iPhone notch and home indicator safe areas */
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
   }
 }
 
@@ -146,11 +159,49 @@ button, a {
   touch-action: manipulation;
 }
 
-/* Touch & Mobile Optimizations */
+/* Touch, Viewport & Responsive Media Queries */
 @media (max-width: 640px) {
   body {
     -webkit-tap-highlight-color: transparent;
   }
+
+  /* Prevent auto-zooming on iOS inputs when focused */
+  input[type="text"],
+  input[type="number"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="tel"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Tablet Optimizations (641px to 1024px) */
+@media (min-width: 641px) and (max-width: 1024px) {
+  /* Ensure comfortable touch targets and spacing on tablets */
+  button, [role="button"] {
+    min-height: 40px;
+  }
+}
+
+/* Virtual Keyboard Viewport Adaptation (when viewport height decreases significantly) */
+@media (max-height: 520px) and (orientation: landscape) {
+  .keyboard-compact {
+    padding-top: 0.25rem !important;
+    padding-bottom: 0.25rem !important;
+  }
+}
+
+/* Responsive Container Safe Bounds */
+.responsive-container {
+  width: 100%;
+  max-width: 100%;
+  padding-left: clamp(0.75rem, 3vw, 2rem);
+  padding-right: clamp(0.75rem, 3vw, 2rem);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* Modal Animations */
@@ -177,3 +228,55 @@ button, a {
 .animate-scaleUp {
   animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* OTP Verification Keyframe Animations */
+@keyframes shakeLock {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+@keyframes pulseGlowGreen {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.4), inset 0 0 10px rgba(34, 197, 94, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(34, 197, 94, 0.7), inset 0 0 15px rgba(34, 197, 94, 0.4);
+  }
+}
+
+@keyframes pulseGlowPurple {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(127, 0, 255, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(127, 0, 255, 0.6);
+  }
+}
+
+.animate-shake-lock {
+  animation: shakeLock 0.45s ease-in-out;
+}
+
+.animate-glow-success {
+  animation: pulseGlowGreen 2s infinite ease-in-out;
+}
+
+.animate-glow-purple {
+  animation: pulseGlowPurple 3s infinite ease-in-out;
+}
+
+/* Mobile Keyboard Active State: Hide obstructive floating bars */
+body.keyboard-open #bottom-navigation-bar {
+  transform: translateX(-50%) translateY(120px) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.keyboard-open #floating-support-toggle-btn,
+body.keyboard-open [data-floating-support] {
+  transform: translateY(120px) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+

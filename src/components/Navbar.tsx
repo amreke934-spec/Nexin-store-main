@@ -82,20 +82,20 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
         <div className="flex items-center justify-between gap-2 sm:gap-4">
           
           {/* 1. Sidebar Trigger & Store Name (Clean & Minimalist, No Logo) */}
-          <div className="flex items-center gap-2.5 sm:gap-3.5">
+          <div className="flex items-center gap-2 sm:gap-3.5">
             <button
               id="sidebar-drawer-trigger"
               type="button"
               onClick={onOpenSidebar}
-              className="p-2 sm:p-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/60 border border-purple-200 dark:border-purple-800/60 text-slate-800 dark:text-white transition-all cursor-pointer shadow-xs active:scale-95 group flex items-center justify-center shrink-0"
+              className="p-1.5 min-[360px]:p-2 sm:p-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/60 border border-purple-200 dark:border-purple-800/60 text-slate-800 dark:text-white transition-all cursor-pointer shadow-xs active:scale-95 group flex items-center justify-center shrink-0"
               title="فتح القائمة الجانبية"
             >
-              <Menu className="w-5 h-5 text-[#7F00FF] dark:text-purple-400 group-hover:scale-110 transition-transform" />
+              <Menu className="w-4 h-4 min-[360px]:w-5 min-[360px]:h-5 text-[#7F00FF] dark:text-purple-400 group-hover:scale-110 transition-transform" />
             </button>
 
             <span 
               onClick={() => setActiveTab('products')} 
-              className="text-base sm:text-xl font-black tracking-tight text-slate-900 dark:text-white select-none cursor-pointer transition-opacity hover:opacity-90"
+              className="text-sm min-[360px]:text-base sm:text-xl font-black tracking-tight text-slate-900 dark:text-white select-none cursor-pointer transition-opacity hover:opacity-90"
             >
               NEXEN <span className="text-[#7F00FF] dark:text-purple-400">STORE</span>
             </span>

@@ -10,11 +10,15 @@ import {
   Sparkles
 } from 'lucide-react';
 
-interface FloatingSupportWidgetProps {}
+interface FloatingSupportWidgetProps {
+  isKeyboardOpen?: boolean;
+}
 
-export const FloatingSupportWidget: React.FC<FloatingSupportWidgetProps> = React.memo(() => {
+export const FloatingSupportWidget: React.FC<FloatingSupportWidgetProps> = React.memo(({ isKeyboardOpen = false }) => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const widgetRef = useRef<HTMLDivElement>(null);
+
+  if (isKeyboardOpen) return null;
 
   const whatsappUrl = 'https://wa.me/963933829164';
   const telegramSupportUrl = 'https://t.me/+963933829164';
@@ -54,13 +58,17 @@ export const FloatingSupportWidget: React.FC<FloatingSupportWidgetProps> = React
   return (
     <div 
       ref={widgetRef}
-      className="fixed bottom-20 left-4 sm:bottom-6 sm:left-6 z-50 select-none"
+      className="fixed z-50 select-none sm:!bottom-6 sm:!left-6"
+      style={{
+        bottom: 'calc(4.75rem + env(safe-area-inset-bottom, 0px))',
+        left: 'calc(0.75rem + env(safe-area-inset-left, 0px))'
+      }}
       dir="rtl"
     >
       {/* Modal Dialog with Darkened Blur Backdrop */}
       {isOpen && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-sm transition-all duration-300 animate-fadeIn"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm transition-all duration-300 animate-fadeIn"
           onClick={() => setIsOpen(false)}
           role="dialog"
           aria-modal="true"
@@ -70,7 +78,7 @@ export const FloatingSupportWidget: React.FC<FloatingSupportWidgetProps> = React
           <div 
             id="support-popup-menu"
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-3xl bg-white dark:bg-[#121624] border border-purple-200/80 dark:border-purple-800/60 shadow-2xl p-5 sm:p-6 space-y-4 transform transition-all duration-300 scale-100 animate-scaleUp"
+            className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl sm:rounded-3xl bg-white dark:bg-[#121624] border border-purple-200/80 dark:border-purple-800/60 shadow-2xl p-4 sm:p-6 space-y-4 transform transition-all duration-300 scale-100 animate-scaleUp"
           >
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">

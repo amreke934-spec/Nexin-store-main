@@ -66,6 +66,7 @@ const inMemoryVerifications = new Map<string, VerificationRecord>();
 const inMemoryOrders = new Map<string, any>();
 const inMemorySettings = new Map<string, any>();
 const inMemoryWalletTransactions: any[] = [];
+const inMemorySupportTickets = new Map<string, any>();
 
 // Seed default settings
 inMemorySettings.set('exchange_rate', { usd_to_syp: 15000 });
@@ -1053,6 +1054,48 @@ app.post('/api/orders/save', async (req: Request, res: Response) => {
   }
 });
 
+// Clear orders from DB and in-memory cache
+app.post('/api/orders/clear', async (req: Request, res: Response) => {
+  const { userId, email } = req.body || {};
+
+  try {
+    const pool = getDbPool();
+    if (pool) {
+      try {
+        if (userId && email) {
+          await pool.query('DELETE FROM orders WHERE user_id = $1 OR customer_email = $2', [String(userId), String(email)]);
+        } else if (userId) {
+          await pool.query('DELETE FROM orders WHERE user_id = $1', [String(userId)]);
+        } else if (email) {
+          await pool.query('DELETE FROM orders WHERE customer_email = $1', [String(email)]);
+        } else {
+          await pool.query('DELETE FROM orders');
+        }
+      } catch (dbErr: any) {
+        console.warn('DB error in /api/orders/clear, falling back to memory:', dbErr.message);
+      }
+    }
+
+    // Clear in-memory
+    if (userId || email) {
+      for (const [id, o] of inMemoryOrders.entries()) {
+        const matchUser = userId && (o.userId === userId || o.user_id === userId);
+        const matchEmail = email && ((o.customerEmail && o.customerEmail.toLowerCase() === String(email).toLowerCase()) || (o.customer_email && o.customer_email.toLowerCase() === String(email).toLowerCase()));
+        if (matchUser || matchEmail) {
+          inMemoryOrders.delete(id);
+        }
+      }
+    } else {
+      inMemoryOrders.clear();
+    }
+
+    return res.json({ success: true, message: 'Orders cleared successfully' });
+  } catch (err: any) {
+    console.error('Error in POST /api/orders/clear:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ==========================================
 // 4. SETTINGS & CURRENCY APIS (NEON POSTGRES)
 // ==========================================
@@ -1621,6 +1664,331 @@ app.put('/api/deposit-requests/:id/status', async (req: Request, res: Response) 
     });
   } catch (err: any) {
     console.error('Error in PUT /api/deposit-requests/:id/status:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 4.4. SUPPORT TICKETS & REPORT PROBLEM APIS
+// ==========================================
+
+function mapDbSupportTicket(row: any) {
+  let cleanRepliedBy = row.replied_by || null;
+  if (
+    cleanRepliedBy &&
+    (cleanRepliedBy.includes('m74321176') ||
+      cleanRepliedBy.includes('محمد جعفر') ||
+      cleanRepliedBy.includes('@'))
+  ) {
+    cleanRepliedBy = 'فريق الدعم الفني | Nexen Support';
+  } else if (!cleanRepliedBy && row.admin_reply) {
+    cleanRepliedBy = 'فريق الدعم الفني | Nexen Support';
+  }
+
+  return {
+    id: row.id,
+    userId: row.user_id || null,
+    userName: row.user_name || '',
+    userEmail: row.user_email || '',
+    userPhone: row.user_phone || null,
+    subject: row.subject || '',
+    category: row.category || 'other',
+    message: row.message || '',
+    status: row.status || 'pending',
+    priority: row.priority || 'normal',
+    adminReply: row.admin_reply || null,
+    repliedAt: row.replied_at || null,
+    repliedBy: cleanRepliedBy,
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString(),
+  };
+}
+
+// 1. Create a new support ticket / issue report
+app.post('/api/support/tickets', async (req: Request, res: Response) => {
+  try {
+    const { userId, userName, userEmail, userPhone, subject, category, message, priority } = req.body || {};
+
+    if (!userName || !userName.trim()) {
+      return res.status(400).json({ error: 'الاسم مطلوب' });
+    }
+    if (!userEmail || !userEmail.trim()) {
+      return res.status(400).json({ error: 'البريد الإلكتروني مطلوب' });
+    }
+    if (!subject || !subject.trim()) {
+      return res.status(400).json({ error: 'عنوان المشكلة مطلوب' });
+    }
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'تفاصيل المشكلة مطلوبة' });
+    }
+
+    const ticketId = `TKT-${Date.now().toString().slice(-6)}`;
+    const nowIso = new Date().toISOString();
+
+    const newTicket = {
+      id: ticketId,
+      userId: userId || null,
+      userName: userName.trim(),
+      userEmail: userEmail.trim().toLowerCase(),
+      userPhone: userPhone ? String(userPhone).trim() : null,
+      subject: subject.trim(),
+      category: category || 'other',
+      message: message.trim(),
+      status: 'pending',
+      priority: priority || 'normal',
+      adminReply: null,
+      repliedAt: null,
+      repliedBy: null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    // Store in-memory
+    inMemorySupportTickets.set(ticketId, newTicket);
+
+    // Save to PostgreSQL if available
+    const pool = getDbPool();
+    if (pool) {
+      try {
+        await pool.query(
+          `INSERT INTO support_tickets (
+            id, user_id, user_name, user_email, user_phone, 
+            subject, category, message, status, priority, 
+            created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            message = EXCLUDED.message,
+            updated_at = NOW()`,
+          [
+            ticketId,
+            userId || null,
+            userName.trim(),
+            userEmail.trim().toLowerCase(),
+            userPhone ? String(userPhone).trim() : null,
+            subject.trim(),
+            category || 'other',
+            message.trim(),
+            'pending',
+            priority || 'normal',
+          ]
+        );
+      } catch (dbErr: any) {
+        console.warn('DB insert error for support ticket, stored in memory:', dbErr.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      ticket: newTicket,
+      message: 'تم إرسال بلاغك بنجاح! سيتم مراجعته والرد عليه من قبل الإدارة في أقرب وقت.',
+    });
+  } catch (err: any) {
+    console.error('Error in POST /api/support/tickets:', err);
+    return res.status(500).json({ error: err.message || 'حدث خطأ أثناء إرسال البلاغ' });
+  }
+});
+
+// 2. Get tickets (with user filter or all tickets for admin)
+app.get('/api/support/tickets', async (req: Request, res: Response) => {
+  try {
+    const { userId, userEmail, isAdmin } = req.query;
+    const pool = getDbPool();
+
+    if (pool) {
+      try {
+        let query = 'SELECT * FROM support_tickets';
+        const params: any[] = [];
+
+        if (isAdmin !== 'true') {
+          if (userId && userEmail) {
+            query += ' WHERE user_id = $1 OR LOWER(user_email) = LOWER($2)';
+            params.push(userId, String(userEmail).trim().toLowerCase());
+          } else if (userId) {
+            query += ' WHERE user_id = $1';
+            params.push(userId);
+          } else if (userEmail) {
+            query += ' WHERE LOWER(user_email) = LOWER($1)';
+            params.push(String(userEmail).trim().toLowerCase());
+          }
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        const dbRes = await pool.query(query, params);
+        const tickets = dbRes.rows.map(mapDbSupportTicket);
+        return res.json({ success: true, tickets });
+      } catch (dbErr: any) {
+        console.warn('DB select error for support tickets, serving in-memory:', dbErr.message);
+      }
+    }
+
+    // In-memory fallback
+    let tickets = Array.from(inMemorySupportTickets.values());
+    if (isAdmin !== 'true') {
+      const cleanEmail = userEmail ? String(userEmail).trim().toLowerCase() : null;
+      tickets = tickets.filter((t) => {
+        if (userId && t.userId === userId) return true;
+        if (cleanEmail && t.userEmail && t.userEmail.toLowerCase() === cleanEmail) return true;
+        return false;
+      });
+    }
+
+    tickets = tickets.map((t) => {
+      let cleanRep = t.repliedBy;
+      if (
+        !cleanRep ||
+        cleanRep.includes('m74321176') ||
+        cleanRep.includes('محمد جعفر') ||
+        cleanRep.includes('@')
+      ) {
+        cleanRep = t.adminReply ? 'فريق الدعم الفني | Nexen Support' : null;
+      }
+      return { ...t, repliedBy: cleanRep };
+    });
+
+    tickets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return res.json({ success: true, tickets });
+  } catch (err: any) {
+    console.error('Error in GET /api/support/tickets:', err);
+    return res.status(500).json({ error: err.message || 'حدث خطأ أثناء جلب البلاغات' });
+  }
+});
+
+// 3. Admin: Reply to a ticket
+app.post('/api/support/tickets/:id/reply', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { adminReply, status, adminEmail } = req.body || {};
+
+    if (!adminReply || !adminReply.trim()) {
+      return res.status(400).json({ error: 'نص الرد مطلوب' });
+    }
+
+    const replyText = adminReply.trim();
+    const newStatus = status || 'resolved';
+    let cleanRepliedBy = 'فريق الدعم الفني | Nexen Support';
+    if (
+      adminEmail &&
+      !adminEmail.includes('m74321176') &&
+      !adminEmail.includes('محمد جعفر') &&
+      !adminEmail.includes('@')
+    ) {
+      cleanRepliedBy = adminEmail.trim();
+    }
+    const repliedBy = cleanRepliedBy;
+    const nowIso = new Date().toISOString();
+
+    // Update in-memory
+    let updatedTicket = inMemorySupportTickets.get(id);
+    if (updatedTicket) {
+      updatedTicket.adminReply = replyText;
+      updatedTicket.status = newStatus;
+      updatedTicket.repliedAt = nowIso;
+      updatedTicket.repliedBy = repliedBy;
+      updatedTicket.updatedAt = nowIso;
+      inMemorySupportTickets.set(id, updatedTicket);
+    }
+
+    // Update PostgreSQL
+    const pool = getDbPool();
+    if (pool) {
+      try {
+        const dbRes = await pool.query(
+          `UPDATE support_tickets 
+           SET admin_reply = $1, 
+               status = $2, 
+               replied_at = NOW(), 
+               replied_by = $3, 
+               updated_at = NOW() 
+           WHERE id = $4 
+           RETURNING *;`,
+          [replyText, newStatus, repliedBy, id]
+        );
+        if (dbRes.rows.length > 0) {
+          updatedTicket = mapDbSupportTicket(dbRes.rows[0]);
+        }
+      } catch (dbErr: any) {
+        console.warn('DB update error for support ticket reply:', dbErr.message);
+      }
+    }
+
+    if (!updatedTicket) {
+      return res.status(404).json({ error: 'البلاغ غير موجود' });
+    }
+
+    return res.json({
+      success: true,
+      ticket: updatedTicket,
+      message: 'تم إرسال الرد بنجاح!',
+    });
+  } catch (err: any) {
+    console.error('Error in POST /api/support/tickets/:id/reply:', err);
+    return res.status(500).json({ error: err.message || 'حدث خطأ أثناء إرسال الرد' });
+  }
+});
+
+// 4. Admin: Update ticket status
+app.patch('/api/support/tickets/:id/status', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body || {};
+
+    if (!status) {
+      return res.status(400).json({ error: 'الحالة مطلوبة' });
+    }
+
+    const nowIso = new Date().toISOString();
+    let updatedTicket = inMemorySupportTickets.get(id);
+    if (updatedTicket) {
+      updatedTicket.status = status;
+      updatedTicket.updatedAt = nowIso;
+      inMemorySupportTickets.set(id, updatedTicket);
+    }
+
+    const pool = getDbPool();
+    if (pool) {
+      try {
+        const dbRes = await pool.query(
+          `UPDATE support_tickets SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *;`,
+          [status, id]
+        );
+        if (dbRes.rows.length > 0) {
+          updatedTicket = mapDbSupportTicket(dbRes.rows[0]);
+        }
+      } catch (dbErr: any) {
+        console.warn('DB update status error for support ticket:', dbErr.message);
+      }
+    }
+
+    if (!updatedTicket) {
+      return res.status(404).json({ error: 'البلاغ غير موجود' });
+    }
+
+    return res.json({ success: true, ticket: updatedTicket });
+  } catch (err: any) {
+    console.error('Error in PATCH /api/support/tickets/:id/status:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Admin: Delete a ticket
+app.delete('/api/support/tickets/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    inMemorySupportTickets.delete(id);
+
+    const pool = getDbPool();
+    if (pool) {
+      try {
+        await pool.query('DELETE FROM support_tickets WHERE id = $1', [id]);
+      } catch (dbErr: any) {
+        console.warn('DB delete error for support ticket:', dbErr.message);
+      }
+    }
+
+    return res.json({ success: true, message: 'تم حذف البلاغ بنجاح' });
+  } catch (err: any) {
+    console.error('Error in DELETE /api/support/tickets/:id:', err);
     return res.status(500).json({ error: err.message });
   }
 });

@@ -173,6 +173,26 @@ const SCHEMA_DEFINITIONS: TableDefinition[] = [
       { name: 'updated_at', type: 'TIMESTAMPTZ', default: 'NOW()' },
     ],
   },
+  {
+    name: 'support_tickets',
+    primaryKey: 'id VARCHAR(128) PRIMARY KEY',
+    columns: [
+      { name: 'user_id', type: 'VARCHAR(128)' },
+      { name: 'user_name', type: 'VARCHAR(255)', nullable: false, default: "''" },
+      { name: 'user_email', type: 'VARCHAR(255)', nullable: false, default: "''" },
+      { name: 'user_phone', type: 'VARCHAR(100)' },
+      { name: 'subject', type: 'VARCHAR(255)', nullable: false, default: "''" },
+      { name: 'category', type: 'VARCHAR(50)', default: "'other'" },
+      { name: 'message', type: 'TEXT', nullable: false, default: "''" },
+      { name: 'status', type: 'VARCHAR(50)', default: "'pending'" },
+      { name: 'priority', type: 'VARCHAR(50)', default: "'normal'" },
+      { name: 'admin_reply', type: 'TEXT' },
+      { name: 'replied_at', type: 'TIMESTAMPTZ' },
+      { name: 'replied_by', type: 'VARCHAR(128)' },
+      { name: 'created_at', type: 'TIMESTAMPTZ', default: 'NOW()' },
+      { name: 'updated_at', type: 'TIMESTAMPTZ', default: 'NOW()' },
+    ],
+  },
 ];
 
 /**
@@ -296,6 +316,21 @@ export async function initializeDatabase(): Promise<{ success: boolean; error?: 
       console.log('✅ [Neon DB] Users currency column verified as SYP');
     } catch (migErr) {
       console.warn('⚠️ [Neon DB] Non-fatal migration error setting currency to SYP:', migErr);
+    }
+
+    // Clean up support_tickets replied_by to ensure professional customer support name
+    try {
+      await client.query(`
+        UPDATE support_tickets 
+        SET replied_by = 'فريق الدعم الفني | Nexen Support' 
+        WHERE replied_by LIKE '%m74321176%' 
+           OR replied_by LIKE '%محمد جعفر%' 
+           OR replied_by LIKE '%@%'
+           OR (replied_by IS NULL AND admin_reply IS NOT NULL);
+      `);
+      console.log('✅ [Neon DB] Sanitized support_tickets replied_by to "فريق الدعم الفني | Nexen Support"');
+    } catch (sanitizeTicketErr) {
+      // Non-fatal if table doesn't exist yet
     }
 
 

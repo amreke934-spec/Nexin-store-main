@@ -15,7 +15,8 @@ import {
   Sparkles,
   User,
   RefreshCw,
-  Wallet
+  Wallet,
+  LifeBuoy
 } from 'lucide-react';
 import { CustomerUser, MerchantInfo } from '../types';
 import { NexenLogo } from './NexenLogo';
@@ -31,7 +32,7 @@ interface SidebarDrawerProps {
   onRefreshMerchant?: () => void;
   onOpenDeposit?: () => void;
   activeTab: string;
-  onNavigate: (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about') => void;
+  onNavigate: (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about' | 'support') => void;
   onOpenAuth: (mode?: 'login' | 'register') => void;
   onLogout: () => void;
   theme: 'light' | 'dark';
@@ -77,7 +78,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
     : 0;
   const activeCurrency = currentUser?.currency || 'USD';
 
-  const handleNavClick = (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about') => {
+  const handleNavClick = (tab: 'products' | 'orders' | 'settings' | 'history' | 'auth' | 'admin' | 'about' | 'support') => {
     if (isMaintenanceActive && !isAdmin && (tab === 'orders' || tab === 'settings')) {
       alert('الموقع في وضع الصيانة حالياً - الإجراءات متوقفة مؤقتاً.');
       return;
@@ -95,8 +96,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
       />
 
       {/* Drawer Container (Right side for RTL) */}
-      <div className="fixed inset-y-0 right-0 max-w-full flex pl-10 z-10">
-        <div className="w-screen max-w-xs sm:max-w-sm bg-white dark:bg-[#111524] text-slate-900 dark:text-slate-100 shadow-2xl flex flex-col justify-between border-l border-slate-200 dark:border-slate-800 transition-all duration-300 animate-slideInRight">
+      <div className="fixed inset-y-0 right-0 max-w-full flex pl-4 sm:pl-10 z-10">
+        <div className="w-screen max-w-[85vw] sm:max-w-sm h-full min-h-[100dvh] bg-white dark:bg-[#111524] text-slate-900 dark:text-slate-100 shadow-2xl flex flex-col justify-between border-l border-slate-200 dark:border-slate-800 transition-all duration-300 animate-slideInRight">
           
           {/* 1. Header Section */}
           <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50/70 dark:bg-slate-900/50">
@@ -278,6 +279,27 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = React.memo(({
                   <span>لمحة عن التطبيق</span>
                 </div>
                 <ChevronLeft className="w-4 h-4 opacity-70" />
+              </button>
+
+              {/* 4. Support & Complaints Chat (الدعم الفني المباشر) */}
+              <button
+                type="button"
+                id="sidebar-support-btn"
+                onClick={() => handleNavClick('support')}
+                className={`w-full flex items-center justify-between p-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  activeTab === 'support'
+                    ? 'bg-[#7F00FF] text-white shadow-xs'
+                    : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-700 dark:text-slate-200'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <LifeBuoy className="w-4 h-4 text-[#7F00FF] dark:text-purple-400" />
+                  <span>الدعم الفني والشكاوى</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <ChevronLeft className="w-4 h-4 opacity-70" />
+                </div>
               </button>
 
               {/* 5. Settings (Only if logged in) */}

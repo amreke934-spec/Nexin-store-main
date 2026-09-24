@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   X,
   AlertCircle,
@@ -19,9 +19,14 @@ import {
   ChevronRight,
   ShieldCheck,
   AlertTriangle,
+  ImageIcon,
+  UploadCloud,
+  Trash2,
+  Maximize2,
 } from 'lucide-react';
 import { CustomerUser, SupportTicket } from '../types';
 import { createSupportTicket, fetchSupportTickets } from '../services/dbApi';
+import { compressImageFile } from '../utils/imageCompressor';
 
 interface ReportProblemModalProps {
   isOpen: boolean;
@@ -53,6 +58,12 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [priority, setPriority] = useState<'normal' | 'urgent'>('normal');
+
+  // Images attachment state
+  const [images, setImages] = useState<string[]>([]);
+  const [isProcessingImages, setIsProcessingImages] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string; ticketId?: string } | null>(null);
@@ -103,6 +114,38 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
     }
   }, [currentUser]);
 
+  // Image upload and processing handlers
+  const handleImageFiles = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    if (fileArray.length === 0) return;
+
+    if (images.length + fileArray.length > 4) {
+      alert('الحد الأقصى المسموح به هو 4 صور لكل بلاغ');
+    }
+
+    const availableSlots = Math.max(0, 4 - images.length);
+    const filesToProcess = fileArray.slice(0, availableSlots);
+
+    if (filesToProcess.length === 0) return;
+
+    setIsProcessingImages(true);
+    try {
+      const processed = await Promise.all(
+        filesToProcess.map((file) => compressImageFile(file, 1280, 1280, 0.82))
+      );
+      setImages((prev) => [...prev, ...processed]);
+    } catch (err: any) {
+      setFeedback({ type: 'error', text: err?.message || 'حدث خطأ أثناء معالجة الصور' });
+    } finally {
+      setIsProcessingImages(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
   // Form Submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,6 +167,7 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
         subject: subject.trim(),
         message: message.trim(),
         priority,
+        images,
       });
 
       if (res.success && res.ticket) {
@@ -143,6 +187,7 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
         // Reset form content
         setSubject('');
         setMessage('');
+        setImages([]);
 
         // Refresh list
         loadUserTickets();
@@ -424,6 +469,98 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
                 />
               </div>
 
+              {/* 5. Image Attachments (لقطات الشاشة والصور) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-[#7F00FF]" />
+                    <span>إرفاق صور أو لقطات شاشة للمشكلة (اختياري - حتى 4 صور)</span>
+                  </label>
+                  <span className="text-[11px] font-mono font-bold text-slate-400">
+                    {images.length}/4 صور
+                  </span>
+                </div>
+
+                {/* Upload Trigger Dropzone */}
+                {images.length < 4 && (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (e.dataTransfer.files) handleImageFiles(e.dataTransfer.files);
+                    }}
+                    className="border-2 border-dashed border-purple-200 dark:border-purple-900/60 hover:border-[#7F00FF] dark:hover:border-purple-500 bg-purple-50/40 dark:bg-purple-950/20 rounded-2xl p-4 text-center cursor-pointer transition-all group"
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => e.target.files && handleImageFiles(e.target.files)}
+                      className="hidden"
+                    />
+                    <div className="flex flex-col items-center justify-center gap-1.5">
+                      <div className="w-10 h-10 rounded-full bg-purple-100 dark:bg-purple-900/40 text-[#7F00FF] flex items-center justify-center group-hover:scale-110 transition-transform">
+                        {isProcessingImages ? (
+                          <RefreshCw className="w-5 h-5 animate-spin text-[#7F00FF]" />
+                        ) : (
+                          <UploadCloud className="w-5 h-5 text-[#7F00FF]" />
+                        )}
+                      </div>
+                      <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                        {isProcessingImages
+                          ? 'جاري ضغط ومعالجة الصور المحددة...'
+                          : 'اضغط لاختيار صور من جهازك أو اسحبها وأفلتها هنا'}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        يدعم لقطات الشاشة والصور (PNG, JPG, WebP) مع ضغط سريع ومثالي
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Image Previews Strip */}
+                {images.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                    {images.map((imgSrc, idx) => (
+                      <div
+                        key={idx}
+                        className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 aspect-video shadow-xs"
+                      >
+                        <img
+                          src={imgSrc}
+                          alt={`مرفق ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        {/* Overlay Actions */}
+                        <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setLightboxImage(imgSrc)}
+                            className="p-1.5 rounded-lg bg-white/90 text-slate-800 hover:bg-white hover:text-[#7F00FF] transition-colors cursor-pointer"
+                            title="تكبير ومعاينة الصورة"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveImage(idx)}
+                            className="p-1.5 rounded-lg bg-red-500/90 text-white hover:bg-red-600 transition-colors cursor-pointer"
+                            title="حذف هذه الصورة"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[9px] font-mono">
+                          صورة {idx + 1}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Submit Button */}
               <div className="pt-2">
                 <button
@@ -549,6 +686,35 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
                           {t.message}
                         </div>
 
+                        {/* User's Attached Images (if any) */}
+                        {t.images && t.images.length > 0 && (
+                          <div className="mt-2.5 space-y-1.5">
+                            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                              <ImageIcon className="w-3.5 h-3.5 text-[#7F00FF]" />
+                              <span>الصور والمرفقات المرفوعة ({t.images.length}):</span>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              {t.images.map((imgSrc, imgIdx) => (
+                                <button
+                                  key={imgIdx}
+                                  type="button"
+                                  onClick={() => setLightboxImage(imgSrc)}
+                                  className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 aspect-video hover:ring-2 hover:ring-[#7F00FF] transition-all cursor-pointer text-right"
+                                >
+                                  <img
+                                    src={imgSrc}
+                                    alt={`مرفق ${imgIdx + 1}`}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                  />
+                                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                    <Maximize2 className="w-4 h-4" />
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Date Info */}
                         <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 px-1">
                           <span className="flex items-center gap-1">
@@ -597,6 +763,33 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Lightbox Modal for Fullscreen Image Preview */}
+      {lightboxImage && (
+        <div
+          onClick={() => setLightboxImage(null)}
+          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-w-4xl max-h-[90vh] w-full flex flex-col items-center justify-center"
+          >
+            <button
+              type="button"
+              onClick={() => setLightboxImage(null)}
+              className="absolute -top-12 left-0 p-2.5 text-white/90 hover:text-white bg-white/15 hover:bg-white/25 rounded-full cursor-pointer transition-all shadow-lg"
+              title="إغلاق"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <img
+              src={lightboxImage}
+              alt="معاينة الصورة المرفقة"
+              className="max-h-[82vh] max-w-full object-contain rounded-2xl shadow-2xl border border-white/10"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

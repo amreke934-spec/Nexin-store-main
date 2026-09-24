@@ -23,6 +23,9 @@ import {
   Edit3,
   X,
   ShieldCheck,
+  ImageIcon,
+  Maximize2,
+  Download,
 } from 'lucide-react';
 import { CustomerUser, SupportTicket } from '../../types';
 import {
@@ -58,6 +61,7 @@ export const AdminTicketsTab: React.FC<AdminTicketsTabProps> = ({ currentUser })
   const [replyText, setReplyText] = useState('');
   const [replyStatus, setReplyStatus] = useState<string>('resolved');
   const [isSubmittingReply, setIsSubmittingReply] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
   // Quick feedback alert
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -490,6 +494,44 @@ export const AdminTicketsTab: React.FC<AdminTicketsTabProps> = ({ currentUser })
                   </div>
                 </div>
 
+                {/* Attached Images From User (if any) */}
+                {t.images && t.images.length > 0 && (
+                  <div className="space-y-2 mb-4 p-3.5 rounded-2xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200/60 dark:border-purple-800/40">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                      <span className="flex items-center gap-1.5 text-[#7F00FF] dark:text-purple-400">
+                        <ImageIcon className="w-4 h-4" />
+                        <span>الصور والمرفقات المرسلة من العميل ({t.images.length}):</span>
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-normal">
+                        اضغط على أي صورة للتكبير
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                      {t.images.map((imgSrc, imgIdx) => (
+                        <div
+                          key={imgIdx}
+                          onClick={() => setLightboxImage(imgSrc)}
+                          className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-900 aspect-video cursor-pointer hover:ring-2 hover:ring-[#7F00FF] transition-all shadow-xs"
+                        >
+                          <img
+                            src={imgSrc}
+                            alt={`مرفق ${imgIdx + 1}`}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 text-white">
+                            <Maximize2 className="w-4 h-4" />
+                            <span className="text-[10px] font-bold">معاينة</span>
+                          </div>
+                          <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[9px] font-mono">
+                            صورة {imgIdx + 1}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* ========================================================= */}
                 {/* EXISTING ADMIN REPLY (IF REPLIED)                         */}
                 {/* ========================================================= */}
@@ -613,6 +655,43 @@ export const AdminTicketsTab: React.FC<AdminTicketsTabProps> = ({ currentUser })
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Admin Image Lightbox */}
+      {lightboxImage && (
+        <div
+          onClick={() => setLightboxImage(null)}
+          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-w-4xl max-h-[90vh] w-full flex flex-col items-center justify-center"
+          >
+            <div className="absolute -top-12 left-0 flex items-center gap-2">
+              <a
+                href={lightboxImage}
+                download="support-attachment.jpg"
+                className="p-2.5 text-white/90 hover:text-white bg-white/15 hover:bg-white/25 rounded-full cursor-pointer transition-all shadow-lg flex items-center gap-1.5 text-xs font-bold"
+                title="تحميل الصورة"
+              >
+                <Download className="w-4 h-4" />
+              </a>
+              <button
+                type="button"
+                onClick={() => setLightboxImage(null)}
+                className="p-2.5 text-white/90 hover:text-white bg-white/15 hover:bg-white/25 rounded-full cursor-pointer transition-all shadow-lg"
+                title="إغلاق"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <img
+              src={lightboxImage}
+              alt="معاينة مرفق العميل"
+              className="max-h-[82vh] max-w-full object-contain rounded-2xl shadow-2xl border border-white/10"
+            />
+          </div>
         </div>
       )}
     </div>

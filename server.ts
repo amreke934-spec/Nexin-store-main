@@ -1,7 +1,10 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { getDbPool, initializeDatabase, getDbStatus, queryDb } from './server/db';
 import { SC_STORE_DEFAULT_PRODUCTS_PAYLOAD } from './server/scProductsData';
 import { sendVerificationOtpEmail } from './server/email';
@@ -11,10 +14,116 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+
+// Trust reverse proxy for correct IP rate-limiting
+app.set('trust proxy', 1);
 
 const SC_STORE_BASE_URL = (process.env.SC_STORE_BASE_URL && process.env.SC_STORE_BASE_URL.trim().replace(/\/+$/, '')) || 'https://sc-store.top/api/v1';
-const DEFAULT_API_KEY = (process.env.SC_STORE_API_KEY && process.env.SC_STORE_API_KEY.trim()) || 'sc_c2zhyaCv-3FtC-H7ds-XNLD-6ndNSUaZIpdf';
+// SECURITY: Do not fallback to hardcoded production API key; use environment or store setting
+const DEFAULT_API_KEY = (process.env.SC_STORE_API_KEY && process.env.SC_STORE_API_KEY.trim()) || '';
+
+// JWT Authentication Secret
+const JWT_SECRET = process.env.JWT_SECRET || 'nexen_secure_jwt_token_secret_production_2026';
+
+// Password Hashing & Verification
+export const hashPassword = async (pwd: string): Promise<string> => {
+  return await bcrypt.hash(pwd, 10);
+};
+
+export const verifyPassword = async (inputPwd: string, storedHashOrPlain: string | null | undefined): Promise<boolean> => {
+  if (!storedHashOrPlain) return false;
+  if (storedHashOrPlain.startsWith('$2a$') || storedHashOrPlain.startsWith('$2b$') || storedHashOrPlain.startsWith('$2y$')) {
+    return await bcrypt.compare(inputPwd, storedHashOrPlain);
+  }
+  // Legacy migration check: If plain text matched, we should return true (and caller auto-migrates to bcrypt)
+  return inputPwd === storedHashOrPlain;
+};
+
+// Rate Limiters
+export const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 25, // limit each IP to 25 auth requests per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد المسموح به لمحاولات تسجيل الدخول، يرجى المحاولة بعد قليل.' },
+});
+
+export const otpRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد المسموح به لمحاولات التحقق من الرمز، يرجى المحاولة بعد 15 دقيقة.' },
+});
+
+export const ordersRateLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 30, // max 30 order calls per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'تم تجاوز الحد الأقصى لإرسال الطلبات في الدقيقة، يرجى الانتظار قليلاً.' },
+});
+
+export interface TokenPayload {
+  userId: string;
+  email: string;
+  role: string;
+}
+
+export const generateUserToken = (user: { id: string; email: string; role?: string }): string => {
+  const role = user.role || (isAdminEmail(user.email) ? 'admin' : 'customer');
+  return jwt.sign(
+    {
+      userId: user.id,
+      email: user.email.toLowerCase(),
+      role,
+    },
+    JWT_SECRET,
+    { expiresIn: '30d' }
+  );
+};
+
+export const verifyUserToken = (token: string): TokenPayload | null => {
+  try {
+    return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as TokenPayload;
+  } catch {
+    return null;
+  }
+};
+
+export const authenticateRequest = (req: Request): TokenPayload | null => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return null;
+  const parts = authHeader.split(' ');
+  if (parts.length === 2 && (parts[0] === 'Bearer' || parts[0] === 'Token')) {
+    return verifyUserToken(parts[1]);
+  }
+  return null;
+};
+
+export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+  const user = authenticateRequest(req);
+  if (!user) {
+    return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول كمسؤول للمتابعة (Unauthorized)' });
+  }
+  const isActualAdmin = user.role === 'admin' || isAdminEmail(user.email);
+  if (!isActualAdmin) {
+    return res.status(403).json({ error: 'مرفوض: ليس لديك صلاحيات المسؤول (Forbidden: Admin only)' });
+  }
+  (req as any).authUser = user;
+  next();
+};
+
+export const requireAuth = (req: Request, res: Response, next: NextFunction) => {
+  const user = authenticateRequest(req);
+  if (!user) {
+    return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول أولاً للمتابعة (Unauthorized)' });
+  }
+  (req as any).authUser = user;
+  next();
+};
 
 // In-memory cache for API key and live products
 let activeApiKeyCache: string | null = null;
@@ -215,8 +324,8 @@ app.get('/api/db/status', async (_req: Request, res: Response) => {
   }
 });
 
-// Force manual schema bootstrap / push
-app.post('/api/db/init', async (_req: Request, res: Response) => {
+// Force manual schema bootstrap / push (Admin only)
+app.post('/api/db/init', requireAdmin, async (_req: Request, res: Response) => {
   try {
     const result = await initializeDatabase();
     if (result.success) {
@@ -304,7 +413,7 @@ async function removeVerificationRecord(email: string) {
 }
 
 // 1. Register User & Send Instant OTP (Does NOT log in immediately)
-app.post('/api/auth/register', async (req: Request, res: Response) => {
+app.post('/api/auth/register', authRateLimiter, async (req: Request, res: Response) => {
   const { name, email, phone, password, avatar } = req.body;
 
   if (!name || !email) {
@@ -316,6 +425,10 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
 
   if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
     return res.status(400).json({ error: 'يرجى إدخال بريد إلكتروني صالح' });
+  }
+
+  if (password && String(password).length < 6) {
+    return res.status(400).json({ error: 'يجب أن لا تقل كلمة المرور عن 6 أحرف' });
   }
 
   try {
@@ -365,6 +478,9 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     const otpCode = generate6DigitOtp();
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
+    // Hash password securely with bcrypt before saving into verification record (never store plaintext in DB)
+    const securePasswordHash = password ? await hashPassword(String(password)) : null;
+
     // Save verification state
     await saveVerificationRecord({
       email: cleanEmail,
@@ -373,7 +489,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
         name: name.trim(),
         email: cleanEmail,
         phone: cleanPhone,
-        password: password || null,
+        password: securePasswordHash,
         avatar: avatar || null,
       },
       expiresAt,
@@ -405,7 +521,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
 });
 
 // 2. Verify OTP & Activate User
-app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
+app.post('/api/auth/verify-otp', otpRateLimiter, async (req: Request, res: Response) => {
   const { email, code } = req.body;
 
   if (!email || !code) {
@@ -451,6 +567,13 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
     // Code is correct! Remove verification record
     await removeVerificationRecord(cleanEmail);
 
+    // Hash password securely with bcrypt if not already hashed
+    const hashedPassword = record.userData.password
+      ? (record.userData.password.startsWith('$2')
+          ? record.userData.password
+          : await hashPassword(record.userData.password))
+      : null;
+
     // Create / activate user account
     let formattedUser: any = null;
     const pool = getDbPool();
@@ -460,8 +583,13 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
         const existing = await pool.query('SELECT * FROM users WHERE LOWER(email) = $1 LIMIT 1', [cleanEmail]);
         if (existing.rows.length > 0) {
           const updated = await pool.query(
-            'UPDATE users SET email_verified = true, updated_at = NOW() WHERE LOWER(email) = $1 RETURNING *',
-            [cleanEmail]
+            `UPDATE users 
+             SET email_verified = true, 
+                 password_hash = COALESCE($1, password_hash),
+                 updated_at = NOW() 
+             WHERE LOWER(email) = $2 
+             RETURNING *`,
+            [hashedPassword, cleanEmail]
           );
           const u = updated.rows[0];
           formattedUser = {
@@ -483,19 +611,18 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
 
           const inserted = await pool.query(
             `INSERT INTO users (id, name, email, phone, password_hash, balance, currency, role, avatar, api_key, saved_player_ids, email_verified, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, NOW(), NOW())
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, $10, true, NOW(), NOW())
              RETURNING *`,
             [
               userId,
               record.userData.name,
               cleanEmail,
               record.userData.phone || null,
-              record.userData.password || null,
+              hashedPassword,
               initialBal,
               'SYP',
               userRole,
               record.userData.avatar || null,
-              DEFAULT_API_KEY,
               JSON.stringify({}),
             ]
           );
@@ -527,6 +654,7 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
         name: record.userData.name,
         email: cleanEmail,
         phone: record.userData.phone || null,
+        password: hashedPassword,
         balance: role === 'admin' ? 2500000 : 0.0,
         currency: 'SYP',
         role,
@@ -552,14 +680,24 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
     } else {
       inMemoryUsers.set(formattedUser.id, {
         ...formattedUser,
+        password: hashedPassword,
         updatedAt: new Date().toISOString(),
       });
     }
 
-    // Return authenticated user & success message
+    // Generate JWT token
+    const token = generateUserToken({
+      id: formattedUser.id,
+      email: formattedUser.email,
+      role: formattedUser.role,
+    });
+    formattedUser.token = token;
+
+    // Return authenticated user & signed token
     return res.json({
       success: true,
       verified: true,
+      token,
       user: formattedUser,
       orders: [],
       message: 'تم تأكيد بريدك الإلكتروني وتفعيل حسابك بنجاح!',
@@ -571,7 +709,7 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
 });
 
 // 3. Resend OTP
-app.post('/api/auth/resend-otp', async (req: Request, res: Response) => {
+app.post('/api/auth/resend-otp', otpRateLimiter, async (req: Request, res: Response) => {
   const { email } = req.body;
 
   if (!email) {
@@ -627,12 +765,12 @@ app.post('/api/auth/resend-otp', async (req: Request, res: Response) => {
   }
 });
 
-// 4. Login User (with email verification enforcement)
-app.post('/api/auth/login', async (req: Request, res: Response) => {
+// 4. Login User (Strict Password Authentication & JWT Session)
+app.post('/api/auth/login', authRateLimiter, async (req: Request, res: Response) => {
   const { identifier, password } = req.body;
 
   if (!identifier) {
-    return res.status(400).json({ error: 'Identifier (email or phone) is required' });
+    return res.status(400).json({ error: 'يرجى إدخال البريد الإلكتروني أو رقم الهاتف' });
   }
 
   const cleanId = String(identifier).trim();
@@ -682,6 +820,35 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
             });
           }
 
+          // SECURITY: Authenticate password strictly. Do not permit logins without password verification
+          if (user.password_hash) {
+            if (!password) {
+              return res.status(400).json({ error: 'كلمة المرور مطلوبة لتسجيل الدخول' });
+            }
+            const isPasswordValid = await verifyPassword(String(password), user.password_hash);
+            if (!isPasswordValid) {
+              return res.status(401).json({ error: 'كلمة المرور غير صحيحة' });
+            }
+            // Upgrade plaintext password to bcrypt if applicable
+            if (!user.password_hash.startsWith('$2')) {
+              try {
+                const freshHash = await hashPassword(String(password));
+                await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [freshHash, user.id]);
+              } catch {}
+            }
+          } else {
+            return res.status(400).json({
+              error: 'لم يتم تعيين كلمة مرور لهذا الحساب. يرجى التواصل مع الدعم الفني أو إعادة إنشاء الحساب.',
+            });
+          }
+
+          const role = user.role || (isAdminEmail(user.email) ? 'admin' : 'customer');
+          const token = generateUserToken({
+            id: user.id,
+            email: user.email,
+            role,
+          });
+
           const ordersRes = await pool.query(
             'SELECT * FROM orders WHERE user_id = $1 OR customer_email = $2 ORDER BY created_at DESC',
             [user.id, user.email]
@@ -689,6 +856,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
           return res.json({
             success: true,
+            token,
             user: {
               id: user.id,
               name: user.name,
@@ -696,46 +864,15 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
               phone: user.phone,
               balance: parseFloat(user.balance || '0'),
               currency: 'SYP',
-              role: user.role || (isAdminEmail(user.email) ? 'admin' : 'customer'),
+              role,
               savedPlayerIds: user.saved_player_ids || {},
               emailVerified: true,
               createdAt: user.created_at,
+              token,
             },
             orders: ordersRes.rows.map(mapDbOrderToOrderItem),
           });
         }
-
-        // Auto-provision user account on first login if not found
-        const newId = `USR-${Date.now().toString().slice(-6)}`;
-        const newName = isEmail ? cleanId.split('@')[0] : `مستخدم ${cleanId.slice(-4)}`;
-        const newEmail = isEmail ? cleanId.toLowerCase() : `${cleanId.replace(/\s+/g, '')}@nexenstore.com`;
-        const newPhone = !isEmail ? cleanId : null;
-        const role = isAdminEmail(newEmail) ? 'admin' : 'customer';
-
-        const created = await pool.query(
-          `INSERT INTO users (id, name, email, phone, balance, currency, role, email_verified, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())
-           RETURNING *`,
-          [newId, newName, newEmail, newPhone, role === 'admin' ? 2500000 : 0.0, 'SYP', role]
-        );
-
-        const user = created.rows[0];
-        return res.json({
-          success: true,
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            phone: user.phone,
-            balance: parseFloat(user.balance || '0'),
-            currency: 'SYP',
-            role: user.role || 'customer',
-            savedPlayerIds: user.saved_player_ids || {},
-            emailVerified: true,
-            createdAt: user.created_at,
-          },
-          orders: [],
-        });
       } catch (dbErr: any) {
         console.warn('DB error in /api/auth/login, falling back to memory:', dbErr.message);
       }
@@ -743,84 +880,101 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
     // In-memory fallback
     let user = findInMemoryUser(cleanId);
-    if (!user) {
-      const newId = `USR-${Date.now().toString().slice(-6)}`;
-      const newName = isEmail ? cleanId.split('@')[0] : `مستخدم ${cleanId.slice(-4)}`;
-      const newEmail = isEmail ? cleanId.toLowerCase() : `${cleanId.replace(/\s+/g, '')}@nexenstore.com`;
-      const newPhone = !isEmail ? cleanId : null;
-      const role = isAdminEmail(newEmail) ? 'admin' : 'customer';
-
-      user = {
-        id: newId,
-        name: newName,
-        email: newEmail,
-        phone: newPhone,
-        balance: role === 'admin' ? 2500000 : 0.0,
-        currency: 'SYP',
-        role,
-        savedPlayerIds: {},
-        emailVerified: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      inMemoryUsers.set(user.id, user);
-    } else if (user.emailVerified === false && !isAdminEmail(user.email)) {
-      const otpCode = generate6DigitOtp();
-      await saveVerificationRecord({
-        email: user.email.toLowerCase(),
-        code: otpCode,
-        userData: {
-          name: user.name,
+    if (user) {
+      if (user.emailVerified === false && !isAdminEmail(user.email)) {
+        const otpCode = generate6DigitOtp();
+        await saveVerificationRecord({
           email: user.email.toLowerCase(),
-          phone: user.phone,
-        },
-        expiresAt: Date.now() + 10 * 60 * 1000,
-        attempts: 0,
-        lastSentAt: Date.now(),
+          code: otpCode,
+          userData: {
+            name: user.name,
+            email: user.email.toLowerCase(),
+            phone: user.phone,
+          },
+          expiresAt: Date.now() + 10 * 60 * 1000,
+          attempts: 0,
+          lastSentAt: Date.now(),
+        });
+
+        await sendVerificationOtpEmail(user.email, otpCode, user.name);
+
+        return res.status(403).json({
+          success: false,
+          requiresVerification: true,
+          email: user.email,
+          error: 'لم يتم تأكيد هذا الحساب بعد. تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني.',
+        });
+      }
+
+      // Verify password in-memory strictly
+      if (user.password) {
+        if (!password) {
+          return res.status(400).json({ error: 'كلمة المرور مطلوبة لتسجيل الدخول' });
+        }
+        const isPasswordValid = await verifyPassword(String(password), user.password);
+        if (!isPasswordValid) {
+          return res.status(401).json({ error: 'كلمة المرور غير صحيحة' });
+        }
+      } else {
+        return res.status(400).json({
+          error: 'لم يتم تعيين كلمة مرور لهذا الحساب.',
+        });
+      }
+
+      const role = user.role || (isAdminEmail(user.email) ? 'admin' : 'customer');
+      const token = generateUserToken({
+        id: user.id,
+        email: user.email,
+        role,
       });
 
-      await sendVerificationOtpEmail(user.email, otpCode, user.name);
-
-      return res.status(403).json({
-        success: false,
-        requiresVerification: true,
-        email: user.email,
-        error: 'لم يتم تأكيد هذا الحساب بعد. تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني.',
+      return res.json({
+        success: true,
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          balance: user.balance || 0,
+          currency: 'SYP',
+          role,
+          savedPlayerIds: user.savedPlayerIds || {},
+          emailVerified: true,
+          createdAt: user.createdAt,
+          token,
+        },
+        orders: [],
       });
     }
 
-    const userOrders = Array.from(inMemoryOrders.values()).filter(
-      (o) => o.userId === user.id || (o.customerEmail && o.customerEmail.toLowerCase() === user.email.toLowerCase())
-    );
-
-    return res.json({
-      success: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        balance: user.balance,
-        currency: 'SYP',
-        role: user.role,
-        savedPlayerIds: user.savedPlayerIds || {},
-        emailVerified: true,
-        createdAt: user.createdAt,
-      },
-      orders: userOrders,
+    // SECURITY: If user not found, reject request! Never auto-create unverified accounts.
+    return res.status(404).json({
+      success: false,
+      error: 'الحساب غير مسجل في قاعدة البيانات. يرجى إنشاء حساب جديد أولاً.',
     });
   } catch (err: any) {
     console.error('Error in /api/auth/login:', err);
-    return res.status(500).json({ error: err.message || 'Database login error' });
+    return res.status(500).json({ error: err.message || 'حدث خطأ أثناء تسجيل الدخول' });
   }
 });
 
-// Update User info / Saved Game IDs
+// Update User info / Saved Game IDs (Authenticated & IDOR protected)
 app.post('/api/users/save-player-id', async (req: Request, res: Response) => {
+  const authUser = authenticateRequest(req);
+  if (!authUser) {
+    return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول أولاً' });
+  }
+
   const { userId, category, playerId } = req.body;
 
   if (!userId || !category || !playerId) {
     return res.status(400).json({ error: 'userId, category, and playerId are required' });
+  }
+
+  const isAdm = authUser.role === 'admin' || isAdminEmail(authUser.email);
+  if (!isAdm && authUser.userId !== userId) {
+    return res.status(403).json({ error: 'غير مصرح لك بتعديل بيانات حساب مستخدم آخر' });
   }
 
   try {
@@ -858,6 +1012,19 @@ app.get('/api/users/profile/:idOrEmail', async (req: Request, res: Response) => 
   try {
     const { idOrEmail } = req.params;
     const clean = decodeURIComponent(idOrEmail || '').trim();
+
+    // Authenticate: user can only view their own profile unless admin
+    const authUser = authenticateRequest(req);
+    if (!authUser) {
+      return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول' });
+    }
+
+    const isAdm = authUser.role === 'admin' || isAdminEmail(authUser.email);
+    const isSelf = authUser.userId === clean || authUser.email.toLowerCase() === clean.toLowerCase();
+    if (!isAdm && !isSelf) {
+      return res.status(403).json({ error: 'مرفوض: لا يمكنك عرض بيانات مستخدم آخر' });
+    }
+
     const pool = getDbPool();
 
     if (pool) {
@@ -890,25 +1057,9 @@ app.get('/api/users/profile/:idOrEmail', async (req: Request, res: Response) => 
     }
 
     // In-memory fallback
-    let user = findInMemoryUser(clean);
+    const user = findInMemoryUser(clean);
     if (!user) {
-      const isEmail = clean.includes('@');
-      const newEmail = isEmail ? clean.toLowerCase() : `${clean.replace(/\s+/g, '')}@nexenstore.com`;
-      const role = isAdminEmail(newEmail) ? 'admin' : 'customer';
-
-      user = {
-        id: `USR-${Date.now().toString().slice(-6)}`,
-        name: isEmail ? clean.split('@')[0] : `مستخدم ${clean.slice(-4)}`,
-        email: newEmail,
-        phone: !isEmail ? clean : null,
-        balance: role === 'admin' ? 2500000 : 0.0,
-        currency: 'SYP',
-        role,
-        savedPlayerIds: {},
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      inMemoryUsers.set(user.id, user);
+      return res.status(404).json({ error: 'المستخدم غير موجود' });
     }
 
     return res.json({
@@ -935,9 +1086,17 @@ app.get('/api/users/profile/:idOrEmail', async (req: Request, res: Response) => 
 // 3. ORDERS APIS (NEON POSTGRES + SC STORE)
 // ==========================================
 
-// Get user orders from DB
+// Get user orders from DB (Protected against IDOR)
 app.get('/api/orders', async (req: Request, res: Response) => {
-  const { userId, email } = req.query;
+  const authUser = authenticateRequest(req);
+  if (!authUser) {
+    return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول أولاً' });
+  }
+
+  const isAdm = authUser.role === 'admin' || isAdminEmail(authUser.email);
+  // Non-admins can strictly only fetch their own orders
+  const targetUserId = isAdm ? (req.query.userId ? String(req.query.userId) : null) : authUser.userId;
+  const targetEmail = isAdm ? (req.query.email ? String(req.query.email).toLowerCase() : null) : authUser.email;
 
   try {
     const pool = getDbPool();
@@ -946,17 +1105,17 @@ app.get('/api/orders', async (req: Request, res: Response) => {
         let queryText = 'SELECT * FROM orders';
         const params: any[] = [];
 
-        if (userId && email) {
+        if (targetUserId && targetEmail) {
           queryText += ' WHERE user_id = $1 OR customer_email = $2 ORDER BY created_at DESC';
-          params.push(String(userId), String(email));
-        } else if (userId) {
+          params.push(targetUserId, targetEmail);
+        } else if (targetUserId) {
           queryText += ' WHERE user_id = $1 ORDER BY created_at DESC';
-          params.push(String(userId));
-        } else if (email) {
+          params.push(targetUserId);
+        } else if (targetEmail) {
           queryText += ' WHERE customer_email = $1 ORDER BY created_at DESC';
-          params.push(String(email));
-        } else {
-          queryText += ' ORDER BY created_at DESC LIMIT 50';
+          params.push(targetEmail);
+        } else if (isAdm) {
+          queryText += ' ORDER BY created_at DESC LIMIT 100';
         }
 
         const result = await pool.query(queryText, params);
@@ -968,15 +1127,16 @@ app.get('/api/orders', async (req: Request, res: Response) => {
 
     // In-memory fallback
     let allOrders = Array.from(inMemoryOrders.values());
-    if (userId) {
-      allOrders = allOrders.filter((o) => o.userId === userId || o.user_id === userId);
-    }
-    if (email) {
+    if (targetUserId) {
+      allOrders = allOrders.filter((o) => o.userId === targetUserId || o.user_id === targetUserId);
+    } else if (targetEmail) {
       allOrders = allOrders.filter(
         (o) =>
-          (o.customerEmail && o.customerEmail.toLowerCase() === String(email).toLowerCase()) ||
-          (o.customer_email && o.customer_email.toLowerCase() === String(email).toLowerCase())
+          (o.customerEmail && o.customerEmail.toLowerCase() === targetEmail) ||
+          (o.customer_email && o.customer_email.toLowerCase() === targetEmail)
       );
+    } else if (!isAdm) {
+      allOrders = [];
     }
     allOrders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     return res.json({ orders: allOrders });
@@ -986,20 +1146,30 @@ app.get('/api/orders', async (req: Request, res: Response) => {
   }
 });
 
-// Save order into DB
+// Save order into DB (Authenticated & tamper-protected)
 app.post('/api/orders/save', async (req: Request, res: Response) => {
-  const { order, userId } = req.body;
+  const authUser = authenticateRequest(req);
+  if (!authUser) {
+    return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول أولاً' });
+  }
 
+  const { order } = req.body;
   if (!order || !order.orderId) {
     return res.status(400).json({ error: 'Valid order object is required' });
   }
+
+  const isAdm = authUser.role === 'admin' || isAdminEmail(authUser.email);
+  // Strictly enforce user ID for non-admins to prevent forging orders for other accounts
+  const effectiveUserId = isAdm ? (order.userId || authUser.userId) : authUser.userId;
+  const effectiveEmail = isAdm ? (order.customerEmail || authUser.email) : authUser.email;
 
   try {
     // Save in memory
     const savedOrder = {
       ...order,
       id: order.id || order.orderId,
-      userId: userId || order.userId,
+      userId: effectiveUserId,
+      customerEmail: effectiveEmail,
       createdAt: order.createdAt || new Date().toISOString(),
     };
     inMemoryOrders.set(order.orderId, savedOrder);
@@ -1023,7 +1193,7 @@ app.post('/api/orders/save', async (req: Request, res: Response) => {
         const values = [
           String(order.id || order.orderId),
           String(order.orderId),
-          userId || order.userId || null,
+          effectiveUserId,
           String(order.productId || ''),
           order.productName || 'منتج رقمي',
           order.category || '',
@@ -1037,7 +1207,7 @@ app.post('/api/orders/save', async (req: Request, res: Response) => {
           JSON.stringify(order.rawResponse || {}),
           order.notes || '',
           order.customerName || null,
-          order.customerEmail || null,
+          effectiveEmail,
         ];
 
         const result = await pool.query(query, values);
@@ -1054,21 +1224,28 @@ app.post('/api/orders/save', async (req: Request, res: Response) => {
   }
 });
 
-// Clear orders from DB and in-memory cache
+// Clear orders from DB and in-memory cache (Protected: only admin can wipe all, users can only clear own)
 app.post('/api/orders/clear', async (req: Request, res: Response) => {
-  const { userId, email } = req.body || {};
+  const authUser = authenticateRequest(req);
+  if (!authUser) {
+    return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول للمتابعة' });
+  }
+
+  const isAdm = authUser.role === 'admin' || isAdminEmail(authUser.email);
+  const targetUserId = isAdm ? req.body?.userId : authUser.userId;
+  const targetEmail = isAdm ? req.body?.email : authUser.email;
 
   try {
     const pool = getDbPool();
     if (pool) {
       try {
-        if (userId && email) {
-          await pool.query('DELETE FROM orders WHERE user_id = $1 OR customer_email = $2', [String(userId), String(email)]);
-        } else if (userId) {
-          await pool.query('DELETE FROM orders WHERE user_id = $1', [String(userId)]);
-        } else if (email) {
-          await pool.query('DELETE FROM orders WHERE customer_email = $1', [String(email)]);
-        } else {
+        if (targetUserId && targetEmail) {
+          await pool.query('DELETE FROM orders WHERE user_id = $1 OR customer_email = $2', [String(targetUserId), String(targetEmail)]);
+        } else if (targetUserId) {
+          await pool.query('DELETE FROM orders WHERE user_id = $1', [String(targetUserId)]);
+        } else if (targetEmail) {
+          await pool.query('DELETE FROM orders WHERE customer_email = $1', [String(targetEmail)]);
+        } else if (isAdm) {
           await pool.query('DELETE FROM orders');
         }
       } catch (dbErr: any) {
@@ -1077,19 +1254,19 @@ app.post('/api/orders/clear', async (req: Request, res: Response) => {
     }
 
     // Clear in-memory
-    if (userId || email) {
+    if (targetUserId || targetEmail) {
       for (const [id, o] of inMemoryOrders.entries()) {
-        const matchUser = userId && (o.userId === userId || o.user_id === userId);
-        const matchEmail = email && ((o.customerEmail && o.customerEmail.toLowerCase() === String(email).toLowerCase()) || (o.customer_email && o.customer_email.toLowerCase() === String(email).toLowerCase()));
+        const matchUser = targetUserId && (o.userId === targetUserId || o.user_id === targetUserId);
+        const matchEmail = targetEmail && ((o.customerEmail && o.customerEmail.toLowerCase() === String(targetEmail).toLowerCase()) || (o.customer_email && o.customer_email.toLowerCase() === String(targetEmail).toLowerCase()));
         if (matchUser || matchEmail) {
           inMemoryOrders.delete(id);
         }
       }
-    } else {
+    } else if (isAdm) {
       inMemoryOrders.clear();
     }
 
-    return res.json({ success: true, message: 'Orders cleared successfully' });
+    return res.json({ success: true, message: 'تم مسح الطلبات بنجاح' });
   } catch (err: any) {
     console.error('Error in POST /api/orders/clear:', err);
     return res.status(500).json({ error: err.message });
@@ -1100,9 +1277,20 @@ app.post('/api/orders/clear', async (req: Request, res: Response) => {
 // 4. SETTINGS & CURRENCY APIS (NEON POSTGRES)
 // ==========================================
 
-// Get Setting
+// Get Setting (Public safe settings only, sensitive settings require admin)
 app.get('/api/settings/:key', async (req: Request, res: Response) => {
   const { key } = req.params;
+  const cleanKey = String(key || '').trim().toLowerCase();
+
+  // Block unauthorized access to secret/admin settings
+  const sensitiveKeywords = ['api_key', 'secret', 'token', 'password', 'sc_store_api', 'sc_sync'];
+  if (sensitiveKeywords.some((kw) => cleanKey.includes(kw))) {
+    const authUser = authenticateRequest(req);
+    const isAdm = authUser && (authUser.role === 'admin' || isAdminEmail(authUser.email));
+    if (!isAdm) {
+      return res.status(403).json({ error: 'غير مصرح: هذا الإعداد محمي وخاص بالإدارة فقط' });
+    }
+  }
 
   try {
     const pool = getDbPool();
@@ -1125,8 +1313,8 @@ app.get('/api/settings/:key', async (req: Request, res: Response) => {
   }
 });
 
-// Save Setting
-app.post('/api/settings', async (req: Request, res: Response) => {
+// Save Setting (Admin Only)
+app.post('/api/settings', requireAdmin, async (req: Request, res: Response) => {
   const { key, value } = req.body;
 
   if (!key || value === undefined) {
@@ -1257,8 +1445,8 @@ app.get('/api/deposit-methods', async (_req: Request, res: Response) => {
   }
 });
 
-// 2. Save / Update deposit methods (Array or single item)
-app.post('/api/deposit-methods', async (req: Request, res: Response) => {
+// 2. Save / Update deposit methods (Array or single item) (Admin only)
+app.post('/api/deposit-methods', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { methods, method } = req.body;
     let updatedMethods: any[] = [];
@@ -1302,8 +1490,8 @@ app.post('/api/deposit-methods', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Delete deposit method
-app.delete('/api/deposit-methods/:id', async (req: Request, res: Response) => {
+// 3. Delete deposit method (Admin only)
+app.delete('/api/deposit-methods/:id', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     inMemoryDepositMethods = inMemoryDepositMethods.filter((m: any) => m.id !== id);
@@ -1325,16 +1513,26 @@ app.delete('/api/deposit-methods/:id', async (req: Request, res: Response) => {
   }
 });
 
-// 4. Get deposit requests (all or by userId)
+// 4. Get deposit requests (Protected: only admin can view all, users can only view their own)
 app.get('/api/deposit-requests', async (req: Request, res: Response) => {
+  const authUser = authenticateRequest(req);
+  if (!authUser) {
+    return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول أولاً' });
+  }
+
+  const isAdm = authUser.role === 'admin' || isAdminEmail(authUser.email);
+  const targetUserId = isAdm ? (req.query.userId ? String(req.query.userId) : null) : authUser.userId;
+  const { status } = req.query;
+
   try {
-    const { userId, status } = req.query;
     const pool = getDbPool();
 
     if (!pool) {
       let filtered = [...inMemoryDepositRequests];
-      if (userId) {
-        filtered = filtered.filter((r) => r.userId === userId);
+      if (targetUserId) {
+        filtered = filtered.filter((r) => r.userId === targetUserId);
+      } else if (!isAdm) {
+        filtered = [];
       }
       if (status) {
         filtered = filtered.filter((r) => r.status === status);
@@ -1346,9 +1544,11 @@ app.get('/api/deposit-requests', async (req: Request, res: Response) => {
     let queryText = 'SELECT * FROM deposit_requests WHERE 1=1';
     const queryParams: any[] = [];
 
-    if (userId) {
-      queryParams.push(String(userId));
+    if (targetUserId) {
+      queryParams.push(targetUserId);
       queryText += ` AND user_id = $${queryParams.length}`;
+    } else if (!isAdm) {
+      return res.json({ success: true, requests: [] });
     }
 
     if (status) {
@@ -1365,21 +1565,23 @@ app.get('/api/deposit-requests', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('Error in GET /api/deposit-requests:', err);
-    let filtered = [...inMemoryDepositRequests];
-    const { userId, status } = req.query;
-    if (userId) filtered = filtered.filter((r) => r.userId === userId);
-    if (status) filtered = filtered.filter((r) => r.status === status);
-    return res.json({ success: true, requests: filtered });
+    return res.status(500).json({ error: err.message });
   }
 });
 
-// 5. Submit new deposit request
+// 5. Submit new deposit request (Authenticated)
 app.post('/api/deposit-requests', async (req: Request, res: Response) => {
+  const authUser = authenticateRequest(req);
+  if (!authUser) {
+    return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول أولاً لإرسال طلب إيداع' });
+  }
+
   try {
-    const { userId, methodId, amount, txNumber, notes } = req.body;
+    const { methodId, amount, txNumber, notes } = req.body;
+    const userId = authUser.userId;
 
     if (!userId || !methodId || amount === undefined || !txNumber) {
-      return res.status(400).json({ error: 'يرجى ملء جميع الحقول المطلوبة (المستخدم، طريقة الإيداع، المبلغ، ورقم العملية)' });
+      return res.status(400).json({ error: 'يرجى ملء جميع الحقول المطلوبة (طريقة الإيداع، المبلغ، ورقم العملية)' });
     }
 
     const numAmount = parseFloat(String(amount));
@@ -1392,9 +1594,31 @@ app.post('/api/deposit-requests', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'يرجى كتابة رقم عملية صحيح' });
     }
 
+    // Anti-fraud: Prevent submitting duplicate transaction number that is already pending or approved
+    const pool = getDbPool();
+    if (pool) {
+      const dupTxCheck = await pool.query(
+        `SELECT id, status FROM deposit_requests WHERE LOWER(tx_number) = LOWER($1) AND status IN ('pending', 'approved') LIMIT 1`,
+        [cleanTx]
+      );
+      if (dupTxCheck.rows.length > 0) {
+        return res.status(400).json({
+          error: 'رقم العملية هذا مسجل مسبقاً في طلب إيداع آخر قيد المعالجة أو مكتمل. يرجى التأكد من رقم العملية.',
+        });
+      }
+    } else {
+      const dupMemTx = inMemoryDepositRequests.find(
+        (r) => r.txNumber?.toLowerCase() === cleanTx.toLowerCase() && ['pending', 'approved'].includes(r.status)
+      );
+      if (dupMemTx) {
+        return res.status(400).json({
+          error: 'رقم العملية هذا مسجل مسبقاً في طلب إيداع آخر قيد المعالجة أو مكتمل. يرجى التأكد من رقم العملية.',
+        });
+      }
+    }
+
     // Find deposit method
     let method = inMemoryDepositMethods.find((m: any) => m.id === methodId);
-    const pool = getDbPool();
 
     if (pool) {
       const methodRes = await pool.query('SELECT value FROM store_settings WHERE key = $1', ['deposit_methods']);
@@ -1437,7 +1661,7 @@ app.post('/api/deposit-requests', async (req: Request, res: Response) => {
 
     // Fetch user details
     let userName = 'مستخدم';
-    let userEmail = '';
+    let userEmail = authUser.email;
     let userPhone = '';
 
     if (pool) {
@@ -1445,7 +1669,7 @@ app.post('/api/deposit-requests', async (req: Request, res: Response) => {
       if (userRes.rows.length > 0) {
         const u = userRes.rows[0];
         userName = u.name || userName;
-        userEmail = u.email || '';
+        userEmail = u.email || userEmail;
         userPhone = u.phone || '';
       }
     }
@@ -1473,6 +1697,8 @@ app.post('/api/deposit-requests', async (req: Request, res: Response) => {
       notes: notes ? String(notes).trim() : '',
       status: 'pending',
       rejectionReason: '',
+      approvedAt: null,
+      approvedBy: null,
       createdAt: nowIso,
       updatedAt: nowIso,
     };
@@ -1495,7 +1721,7 @@ app.post('/api/deposit-requests', async (req: Request, res: Response) => {
         requestId, userId, userName, userEmail, userPhone,
         methodId, method.name, method.currency || 'SYP', exchangeRateToSyp,
         numAmount, feeAmount, feePercentage, netAmount, sypAmount,
-        cleanTx, method.depositAddress || '', notes || '', 'pending',
+        cleanTx, method.depositAddress || '', notes ? String(notes).trim() : '', 'pending',
       ];
       const result = await pool.query(insertQuery, values);
       return res.json({ success: true, request: mapDbDepositRequest(result.rows[0]) });
@@ -1509,8 +1735,8 @@ app.post('/api/deposit-requests', async (req: Request, res: Response) => {
   }
 });
 
-// 6. Admin update deposit request status (Approve & Credit Balance / Reject)
-app.put('/api/deposit-requests/:id/status', async (req: Request, res: Response) => {
+// 6. Admin update deposit request status (Approve & Credit Balance / Reject) (Admin only)
+app.put('/api/deposit-requests/:id/status', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { status, rejectionReason, adminEmail } = req.body;
@@ -1558,13 +1784,27 @@ app.put('/api/deposit-requests/:id/status', async (req: Request, res: Response) 
 
     const depositReq = existingRes.rows[0];
 
-    // If already approved, prevent duplicate balance crediting
-    if (depositReq.status === 'approved' && status === 'approved') {
-      return res.json({ success: true, request: mapDbDepositRequest(depositReq), message: 'الطلب مقبول مسبقاً' });
-    }
-
-    // If approving, credit user balance in SYP
+    // If approving, atomically transition from 'pending' to 'approved' to prevent race-condition double credit
     if (status === 'approved') {
+      const updateRes = await pool.query(
+        `UPDATE deposit_requests SET
+          status = 'approved',
+          rejection_reason = $1,
+          approved_at = NOW(),
+          approved_by = $2,
+          updated_at = NOW()
+         WHERE id = $3 AND status = 'pending'
+         RETURNING *;`,
+        [rejectionReason || null, adminEmail || 'Admin', id]
+      );
+
+      if (updateRes.rows.length === 0) {
+        if (depositReq.status === 'approved') {
+          return res.json({ success: true, request: mapDbDepositRequest(depositReq), message: 'الطلب مقبول مسبقاً' });
+        }
+        return res.status(400).json({ error: 'لا يمكن اعتماد هذا الطلب لأنه لم يعد في حالة الانتظار' });
+      }
+
       const userRes = await pool.query('SELECT * FROM users WHERE id = $1', [depositReq.user_id]);
       if (userRes.rows.length > 0) {
         const user = userRes.rows[0];
@@ -1632,35 +1872,31 @@ app.put('/api/deposit-requests/:id/status', async (req: Request, res: Response) 
           ]
         );
       }
+
+      return res.json({
+        success: true,
+        request: mapDbDepositRequest(updateRes.rows[0]),
+      });
     }
 
-    // Update deposit request
-    const isApproved = status === 'approved';
-    const updateRes = isApproved
-      ? await pool.query(
-          `UPDATE deposit_requests SET
-            status = $1,
-            rejection_reason = $2,
-            approved_at = NOW(),
-            approved_by = $3,
-            updated_at = NOW()
-           WHERE id = $4
-           RETURNING *;`,
-          ['approved', rejectionReason || null, adminEmail || 'Admin', id]
-        )
-      : await pool.query(
-          `UPDATE deposit_requests SET
-            status = $1,
-            rejection_reason = $2,
-            updated_at = NOW()
-           WHERE id = $3
-           RETURNING *;`,
-          [status, rejectionReason || null, id]
-        );
+    // If rejecting
+    const rejectRes = await pool.query(
+      `UPDATE deposit_requests SET
+        status = $1,
+        rejection_reason = $2,
+        updated_at = NOW()
+       WHERE id = $3 AND status = 'pending'
+       RETURNING *;`,
+      [status, rejectionReason || null, id]
+    );
+
+    if (rejectRes.rows.length === 0) {
+      return res.status(400).json({ error: 'لا يمكن رفض هذا الطلب لأنه لم يعد في حالة الانتظار' });
+    }
 
     return res.json({
       success: true,
-      request: mapDbDepositRequest(updateRes.rows[0]),
+      request: mapDbDepositRequest(rejectRes.rows[0]),
     });
   } catch (err: any) {
     console.error('Error in PUT /api/deposit-requests/:id/status:', err);
@@ -1685,6 +1921,18 @@ function mapDbSupportTicket(row: any) {
     cleanRepliedBy = 'فريق الدعم الفني | Nexen Support';
   }
 
+  let imagesList: string[] = [];
+  if (Array.isArray(row.images)) {
+    imagesList = row.images;
+  } else if (typeof row.images === 'string') {
+    try {
+      const parsed = JSON.parse(row.images);
+      if (Array.isArray(parsed)) imagesList = parsed;
+    } catch {
+      imagesList = [];
+    }
+  }
+
   return {
     id: row.id,
     userId: row.user_id || null,
@@ -1694,6 +1942,7 @@ function mapDbSupportTicket(row: any) {
     subject: row.subject || '',
     category: row.category || 'other',
     message: row.message || '',
+    images: imagesList,
     status: row.status || 'pending',
     priority: row.priority || 'normal',
     adminReply: row.admin_reply || null,
@@ -1707,12 +1956,16 @@ function mapDbSupportTicket(row: any) {
 // 1. Create a new support ticket / issue report
 app.post('/api/support/tickets', async (req: Request, res: Response) => {
   try {
-    const { userId, userName, userEmail, userPhone, subject, category, message, priority } = req.body || {};
+    const authUser = authenticateRequest(req);
+    const { userId, userName, userEmail, userPhone, subject, category, message, priority, images } = req.body || {};
+
+    const effectiveUserId = authUser ? authUser.userId : (userId || null);
+    const effectiveEmail = authUser ? authUser.email : (userEmail ? String(userEmail).trim().toLowerCase() : '');
 
     if (!userName || !userName.trim()) {
       return res.status(400).json({ error: 'الاسم مطلوب' });
     }
-    if (!userEmail || !userEmail.trim()) {
+    if (!effectiveEmail) {
       return res.status(400).json({ error: 'البريد الإلكتروني مطلوب' });
     }
     if (!subject || !subject.trim()) {
@@ -1722,18 +1975,29 @@ app.post('/api/support/tickets', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'تفاصيل المشكلة مطلوبة' });
     }
 
+    const cleanSubject = subject.trim().slice(0, 200);
+    const cleanMessage = message.trim().slice(0, 5000);
+
     const ticketId = `TKT-${Date.now().toString().slice(-6)}`;
     const nowIso = new Date().toISOString();
 
+    // Security: Filter images with maximum 5MB size per image and max 5 images
+    const ticketImages: string[] = Array.isArray(images)
+      ? images
+          .filter((img) => typeof img === 'string' && img.trim().length > 0 && img.length <= 5 * 1024 * 1024)
+          .slice(0, 5)
+      : [];
+
     const newTicket = {
       id: ticketId,
-      userId: userId || null,
-      userName: userName.trim(),
-      userEmail: userEmail.trim().toLowerCase(),
-      userPhone: userPhone ? String(userPhone).trim() : null,
-      subject: subject.trim(),
-      category: category || 'other',
-      message: message.trim(),
+      userId: effectiveUserId,
+      userName: userName.trim().slice(0, 100),
+      userEmail: effectiveEmail.slice(0, 100),
+      userPhone: userPhone ? String(userPhone).trim().slice(0, 30) : null,
+      subject: cleanSubject,
+      category: category ? String(category).slice(0, 50) : 'other',
+      message: cleanMessage,
+      images: ticketImages,
       status: 'pending',
       priority: priority || 'normal',
       adminReply: null,
@@ -1753,21 +2017,23 @@ app.post('/api/support/tickets', async (req: Request, res: Response) => {
         await pool.query(
           `INSERT INTO support_tickets (
             id, user_id, user_name, user_email, user_phone, 
-            subject, category, message, status, priority, 
+            subject, category, message, images, status, priority, 
             created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
           ON CONFLICT (id) DO UPDATE SET
             message = EXCLUDED.message,
+            images = EXCLUDED.images,
             updated_at = NOW()`,
           [
             ticketId,
-            userId || null,
+            effectiveUserId,
             userName.trim(),
-            userEmail.trim().toLowerCase(),
+            effectiveEmail,
             userPhone ? String(userPhone).trim() : null,
             subject.trim(),
             category || 'other',
             message.trim(),
+            JSON.stringify(ticketImages),
             'pending',
             priority || 'normal',
           ]
@@ -1790,8 +2056,16 @@ app.post('/api/support/tickets', async (req: Request, res: Response) => {
 
 // 2. Get tickets (with user filter or all tickets for admin)
 app.get('/api/support/tickets', async (req: Request, res: Response) => {
+  const authUser = authenticateRequest(req);
+  if (!authUser) {
+    return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول أولاً' });
+  }
+
+  const isAdm = authUser.role === 'admin' || isAdminEmail(authUser.email);
+  const targetUserId = isAdm ? (req.query.userId ? String(req.query.userId) : null) : authUser.userId;
+  const targetEmail = isAdm ? (req.query.userEmail ? String(req.query.userEmail).trim().toLowerCase() : null) : authUser.email;
+
   try {
-    const { userId, userEmail, isAdmin } = req.query;
     const pool = getDbPool();
 
     if (pool) {
@@ -1799,17 +2073,18 @@ app.get('/api/support/tickets', async (req: Request, res: Response) => {
         let query = 'SELECT * FROM support_tickets';
         const params: any[] = [];
 
-        if (isAdmin !== 'true') {
-          if (userId && userEmail) {
-            query += ' WHERE user_id = $1 OR LOWER(user_email) = LOWER($2)';
-            params.push(userId, String(userEmail).trim().toLowerCase());
-          } else if (userId) {
-            query += ' WHERE user_id = $1';
-            params.push(userId);
-          } else if (userEmail) {
-            query += ' WHERE LOWER(user_email) = LOWER($1)';
-            params.push(String(userEmail).trim().toLowerCase());
-          }
+        if (!isAdm) {
+          query += ' WHERE user_id = $1 OR LOWER(user_email) = LOWER($2)';
+          params.push(targetUserId, targetEmail);
+        } else if (targetUserId && targetEmail) {
+          query += ' WHERE user_id = $1 OR LOWER(user_email) = LOWER($2)';
+          params.push(targetUserId, targetEmail);
+        } else if (targetUserId) {
+          query += ' WHERE user_id = $1';
+          params.push(targetUserId);
+        } else if (targetEmail) {
+          query += ' WHERE LOWER(user_email) = LOWER($1)';
+          params.push(targetEmail);
         }
 
         query += ' ORDER BY created_at DESC';
@@ -1824,13 +2099,15 @@ app.get('/api/support/tickets', async (req: Request, res: Response) => {
 
     // In-memory fallback
     let tickets = Array.from(inMemorySupportTickets.values());
-    if (isAdmin !== 'true') {
-      const cleanEmail = userEmail ? String(userEmail).trim().toLowerCase() : null;
+    if (!isAdm) {
       tickets = tickets.filter((t) => {
-        if (userId && t.userId === userId) return true;
-        if (cleanEmail && t.userEmail && t.userEmail.toLowerCase() === cleanEmail) return true;
+        if (targetUserId && t.userId === targetUserId) return true;
+        if (targetEmail && t.userEmail && t.userEmail.toLowerCase() === targetEmail) return true;
         return false;
       });
+    } else {
+      if (targetUserId) tickets = tickets.filter((t) => t.userId === targetUserId);
+      if (targetEmail) tickets = tickets.filter((t) => t.userEmail && t.userEmail.toLowerCase() === targetEmail);
     }
 
     tickets = tickets.map((t) => {
@@ -1855,7 +2132,7 @@ app.get('/api/support/tickets', async (req: Request, res: Response) => {
 });
 
 // 3. Admin: Reply to a ticket
-app.post('/api/support/tickets/:id/reply', async (req: Request, res: Response) => {
+app.post('/api/support/tickets/:id/reply', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { adminReply, status, adminEmail } = req.body || {};
@@ -1928,7 +2205,7 @@ app.post('/api/support/tickets/:id/reply', async (req: Request, res: Response) =
 });
 
 // 4. Admin: Update ticket status
-app.patch('/api/support/tickets/:id/status', async (req: Request, res: Response) => {
+app.patch('/api/support/tickets/:id/status', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { status } = req.body || {};
@@ -1972,7 +2249,7 @@ app.patch('/api/support/tickets/:id/status', async (req: Request, res: Response)
 });
 
 // 5. Admin: Delete a ticket
-app.delete('/api/support/tickets/:id', async (req: Request, res: Response) => {
+app.delete('/api/support/tickets/:id', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     inMemorySupportTickets.delete(id);
@@ -1999,7 +2276,7 @@ app.delete('/api/support/tickets/:id', async (req: Request, res: Response) => {
 // ==========================================
 
 // 1. Admin Stats & Analytics
-app.get('/api/admin/stats', async (_req: Request, res: Response) => {
+app.get('/api/admin/stats', requireAdmin, async (_req: Request, res: Response) => {
   try {
     const pool = getDbPool();
     if (!pool) {
@@ -2075,7 +2352,7 @@ app.get('/api/admin/stats', async (_req: Request, res: Response) => {
 });
 
 // 2. Admin: Get all registered users with their details and order count
-app.get('/api/admin/users', async (_req: Request, res: Response) => {
+app.get('/api/admin/users', requireAdmin, async (_req: Request, res: Response) => {
   try {
     const pool = getDbPool();
     if (!pool) {
@@ -2131,7 +2408,7 @@ app.get('/api/admin/users', async (_req: Request, res: Response) => {
 });
 
 // 3. Admin: Update user details (Full Edit: Name, Email, Phone, Balance, Role, Password)
-app.put('/api/admin/users/:userId', async (req: Request, res: Response) => {
+app.put('/api/admin/users/:userId', requireAdmin, async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { name, email, phone, balance, role, password } = req.body;
 
@@ -2174,8 +2451,9 @@ app.put('/api/admin/users/:userId', async (req: Request, res: Response) => {
       values.push(String(role).trim());
     }
     if (password) {
+      const hashedPassword = await hashPassword(String(password));
       updates.push(`password_hash = $${idx++}`);
-      values.push(String(password));
+      values.push(hashedPassword);
     }
 
     // Always ensure currency is SYP in database
@@ -2238,7 +2516,7 @@ app.put('/api/admin/users/:userId', async (req: Request, res: Response) => {
 });
 
 // 4. Admin: Delete a user
-app.delete(['/api/admin/users/:userId', '/api/users/:userId'], async (req: Request, res: Response) => {
+app.delete(['/api/admin/users/:userId', '/api/users/:userId'], requireAdmin, async (req: Request, res: Response) => {
   const { userId } = req.params;
   if (!userId) {
     return res.status(400).json({ error: 'User ID is required' });
@@ -2277,7 +2555,7 @@ app.delete(['/api/admin/users/:userId', '/api/users/:userId'], async (req: Reque
 });
 
 // 5. Admin: Create a new user manually
-app.post('/api/admin/users/create', async (req: Request, res: Response) => {
+app.post('/api/admin/users/create', requireAdmin, async (req: Request, res: Response) => {
   const { name, email, phone, balance, role, password } = req.body;
 
   if (!name || !email) {
@@ -2289,6 +2567,7 @@ app.post('/api/admin/users/create', async (req: Request, res: Response) => {
     const userId = `USR-${Date.now().toString().slice(-6)}`;
     const userBalance = parseFloat(String(balance)) || 0.0;
     const userRole = role || 'customer';
+    const hashedPassword = password ? await hashPassword(String(password)) : null;
 
     if (!pool) {
       return res.json({
@@ -2310,7 +2589,7 @@ app.post('/api/admin/users/create', async (req: Request, res: Response) => {
       `INSERT INTO users (id, name, email, phone, balance, currency, role, password_hash, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
        RETURNING *;`,
-      [userId, name.trim(), email.trim().toLowerCase(), phone || null, userBalance, 'SYP', userRole, password || null]
+      [userId, name.trim(), email.trim().toLowerCase(), phone || null, userBalance, 'SYP', userRole, hashedPassword]
     );
 
     const user = insertRes.rows[0];
@@ -2334,7 +2613,7 @@ app.post('/api/admin/users/create', async (req: Request, res: Response) => {
 });
 
 // 6. Admin: Detailed Order Check (DB + SC Store Live)
-app.get('/api/admin/order-check/:orderId', async (req: Request, res: Response) => {
+app.get('/api/admin/order-check/:orderId', requireAdmin, async (req: Request, res: Response) => {
   const { orderId } = req.params;
 
   if (!orderId) {
@@ -2390,10 +2669,16 @@ app.get('/api/admin/order-check/:orderId', async (req: Request, res: Response) =
 // 5. SC STORE ORIGINAL PROXY APIS
 // ==========================================
 
-// 0. Proxy for SC Store icons (/api/icons/game-charge/:id, etc.)
+// 0. Proxy for SC Store icons (/api/icons/game-charge/:id, etc.) - Hardened against SSRF & Traversal
 app.get('/api/icons/*', async (req: Request, res: Response) => {
   try {
-    const targetUrl = `https://sc-store.top${req.originalUrl}`;
+    const rawPath = req.params[0] || '';
+    if (!rawPath || rawPath.includes('..') || rawPath.includes('://') || rawPath.includes('@') || !/^[a-zA-Z0-9_\-\.\/]+$/.test(rawPath)) {
+      return res.status(400).end();
+    }
+
+    const cleanPath = rawPath.replace(/^\/+/, '');
+    const targetUrl = `https://sc-store.top/api/icons/${cleanPath}`;
     const scRes = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -2407,6 +2692,10 @@ app.get('/api/icons/*', async (req: Request, res: Response) => {
     }
 
     const contentType = scRes.headers.get('content-type') || 'image/jpeg';
+    if (!contentType.toLowerCase().startsWith('image/')) {
+      return res.status(403).end();
+    }
+
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
     const arrayBuffer = await scRes.arrayBuffer();
@@ -2416,10 +2705,16 @@ app.get('/api/icons/*', async (req: Request, res: Response) => {
   }
 });
 
-// 0.1 Proxy for SC Store logos (/logos/mtn.png, /logos/game-charge.png, etc.)
+// 0.1 Proxy for SC Store logos (/logos/mtn.png, /logos/game-charge.png, etc.) - Hardened
 app.get('/logos/*', async (req: Request, res: Response) => {
   try {
-    const targetUrl = `https://sc-store.top${req.originalUrl}`;
+    const rawPath = req.params[0] || '';
+    if (!rawPath || rawPath.includes('..') || rawPath.includes('://') || rawPath.includes('@') || !/^[a-zA-Z0-9_\-\.\/]+$/.test(rawPath)) {
+      return res.status(400).end();
+    }
+
+    const cleanPath = rawPath.replace(/^\/+/, '');
+    const targetUrl = `https://sc-store.top/logos/${cleanPath}`;
     const scRes = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -2433,6 +2728,10 @@ app.get('/logos/*', async (req: Request, res: Response) => {
     }
 
     const contentType = scRes.headers.get('content-type') || 'image/png';
+    if (!contentType.toLowerCase().startsWith('image/')) {
+      return res.status(403).end();
+    }
+
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
     const arrayBuffer = await scRes.arrayBuffer();
@@ -2442,8 +2741,8 @@ app.get('/logos/*', async (req: Request, res: Response) => {
   }
 });
 
-// 0.5. API Key Management Endpoints
-app.get('/api/sc/api-key', async (req: Request, res: Response) => {
+// 0.5. API Key Management Endpoints (Admin only)
+app.get('/api/sc/api-key', requireAdmin, async (req: Request, res: Response) => {
   try {
     const activeKey = await getResolvedApiKey(req);
     const isDefault = activeKey === DEFAULT_API_KEY;
@@ -2463,7 +2762,7 @@ app.get('/api/sc/api-key', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/sc/api-key', async (req: Request, res: Response) => {
+app.post('/api/sc/api-key', requireAdmin, async (req: Request, res: Response) => {
   const { apiKey } = req.body || {};
   if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
     return res.status(400).json({ success: false, message: 'مفتاح API مطلوب ولا يمكن تركه فارغاً' });
@@ -2538,8 +2837,8 @@ app.post('/api/sc/api-key', async (req: Request, res: Response) => {
   }
 });
 
-// 1. Get Merchant Info and Balance
-app.get('/api/sc/me', async (req: Request, res: Response) => {
+// 1. Get Merchant Info and Balance (Admin only)
+app.get('/api/sc/me', requireAdmin, async (req: Request, res: Response) => {
   try {
     const authHeaders = await getAuthHeaders(req);
     const response = await fetch(`${SC_STORE_BASE_URL}/me`, {
@@ -2982,8 +3281,8 @@ const loadSyncSettingsFromDb = async () => {
   setupAutoSyncTimer();
 };
 
-// 1.8. Get Current Sync Settings & Status
-app.get('/api/sc/sync/status', async (_req: Request, res: Response) => {
+// 1.8. Get Current Sync Settings & Status (Admin only)
+app.get('/api/sc/sync/status', requireAdmin, async (_req: Request, res: Response) => {
   return res.json({
     intervalMinutes: scSyncSettings.intervalMinutes,
     autoSyncEnabled: scSyncSettings.autoSyncEnabled,
@@ -2996,8 +3295,8 @@ app.get('/api/sc/sync/status', async (_req: Request, res: Response) => {
   });
 });
 
-// 1.9. Update Sync Interval & Auto-sync state
-app.post('/api/sc/sync/settings', async (req: Request, res: Response) => {
+// 1.9. Update Sync Interval & Auto-sync state (Admin only)
+app.post('/api/sc/sync/settings', requireAdmin, async (req: Request, res: Response) => {
   const { intervalMinutes, autoSyncEnabled } = req.body || {};
 
   if (intervalMinutes !== undefined) {
@@ -3048,8 +3347,8 @@ app.post('/api/sc/sync/settings', async (req: Request, res: Response) => {
   });
 });
 
-// 1.95. Trigger Immediate Sync Now
-app.post('/api/sc/sync/now', async (req: Request, res: Response) => {
+// 1.95. Trigger Immediate Sync Now (Admin only)
+app.post('/api/sc/sync/now', requireAdmin, async (req: Request, res: Response) => {
   try {
     const authHeaders = await getAuthHeaders(req);
     const syncResult = await performProductSync('manual', authHeaders);
@@ -3381,7 +3680,14 @@ function generateUniqueOrderId(): string {
 
 // 3. Create New Order / Top-up
 // Supports both game/app products & cash transfer
-app.post('/api/sc/orders', async (req: Request, res: Response) => {
+app.post('/api/sc/orders', ordersRateLimiter, async (req: Request, res: Response) => {
+  const authUser = authenticateRequest(req);
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'يرجى تسجيل الدخول أولاً بحسابك لإتمام عملية الشحن والدفع من رصيدك.',
+    });
+  }
+
   const uniqueOperationOrderId = generateUniqueOrderId();
 
   const {
@@ -3391,13 +3697,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
     cashType,
     amount,
     wallet,
-    userId,
-    userEmail,
     customerName,
-    price,
-    currency,
-    productName,
-    category,
   } = req.body;
 
   try {
@@ -3476,35 +3776,17 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       recentOrderAttempts.set(dupKey, Date.now());
     }
 
-    // 3. User verification and Balance Check
-    if (!userId && !userEmail) {
-      return res.status(401).json({
-        error: 'يرجى تسجيل الدخول أولاً بحسابك لإتمام عملية الشحن والدفع من رصيدك.',
-      });
-    }
-
+    // 3. Authenticated User Lookup & Balance Check
     let dbUser: any = null;
     if (pool) {
       try {
         const userRes = await pool.query(
           'SELECT id, name, email, balance, currency, role FROM users WHERE id = $1 OR email = $2 LIMIT 1;',
-          [userId || '', userEmail || '']
+          [authUser.userId, authUser.email]
         );
 
         if (userRes.rows.length > 0) {
           dbUser = userRes.rows[0];
-        } else {
-          const fallbackId = userId || `USR-${Date.now().toString().slice(-6)}`;
-          const fallbackEmail = userEmail || `${fallbackId.toLowerCase()}@nexen.store`;
-          const fallbackName = customerName || 'عميل المتجر';
-          const insertFallback = await pool.query(
-            `INSERT INTO users (id, name, email, balance, currency, role, created_at, updated_at)
-             VALUES ($1, $2, $3, 0.00, 'SYP', 'customer', NOW(), NOW())
-             ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
-             RETURNING id, name, email, balance, currency, role;`,
-            [fallbackId, fallbackName, fallbackEmail]
-          );
-          dbUser = insertFallback.rows[0];
         }
       } catch (dbErr: any) {
         console.warn('DB error in user lookup for order, falling back to memory:', dbErr.message);
@@ -3512,53 +3794,44 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
     }
 
     if (!dbUser) {
-      let memUser = findInMemoryUser(userId) || findInMemoryUser(userEmail);
-      if (!memUser) {
-        const fallbackId = userId || `USR-${Date.now().toString().slice(-6)}`;
-        const fallbackEmail = userEmail || `${fallbackId.toLowerCase()}@nexen.store`;
-        const fallbackName = customerName || 'عميل المتجر';
-        memUser = {
-          id: fallbackId,
-          name: fallbackName,
-          email: fallbackEmail,
-          balance: 0.0,
-          currency: 'SYP',
-          role: 'customer',
-          savedPlayerIds: {},
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        inMemoryUsers.set(memUser.id, memUser);
-      }
-      dbUser = memUser;
+      dbUser = findInMemoryUser(authUser.userId) || findInMemoryUser(authUser.email);
+    }
+
+    if (!dbUser) {
+      return res.status(404).json({ error: 'حساب المستخدم غير موجود' });
     }
 
     const userBalance = parseFloat(dbUser.balance || '0');
     const userCurrency = 'SYP';
 
-    // 4. Calculate actual required order cost in SYP
-    let unitPrice = Number(price || 0);
-    let itemCurrency = String(currency || 'USD').toUpperCase();
-    let prodName = String(productName || '').trim();
-    let prodCategory = String(category || '').trim();
-
-    if (productId) {
-      const catalogProd = findProductInfo(productId);
-      if (catalogProd) {
-        if (!unitPrice || unitPrice <= 0) unitPrice = Number(catalogProd.price || 0);
-        if (!itemCurrency) itemCurrency = String(catalogProd.currency || 'USD').toUpperCase();
-        if (!prodName) prodName = catalogProd.name;
-        if (!prodCategory) prodCategory = catalogProd.category;
-      }
-    }
+    // 4. Calculate actual required order cost strictly from server catalog (No client price manipulation)
+    let unitPrice = 0;
+    let itemCurrency = 'USD';
+    let prodName = '';
+    let prodCategory = '';
 
     let normalizedCashType = cashType;
     if (cashType) {
       normalizedCashType = String(cashType).toLowerCase().includes('mtn') ? 'mtn_cash' : 'syriatel_cash';
       unitPrice = Number(amount || dynamicFields?.amount || 0);
+      if (!unitPrice || unitPrice <= 0) {
+        return res.status(400).json({ error: 'المبلغ مطلوب ويجب أن يكون أكبر من الصفر' });
+      }
       itemCurrency = 'SYP';
-      if (!prodName) prodName = normalizedCashType === 'mtn_cash' ? 'تحويل MTN كاش' : 'تحويل سيريتل كاش';
-      if (!prodCategory) prodCategory = 'خدمات الكاش';
+      prodName = normalizedCashType === 'mtn_cash' ? 'تحويل MTN كاش' : 'تحويل سيريتل كاش';
+      prodCategory = 'خدمات الكاش';
+    } else if (productId) {
+      const catalogProd = findProductInfo(productId);
+      if (catalogProd && catalogProd.price !== undefined) {
+        unitPrice = Number(catalogProd.price || 0);
+        itemCurrency = String(catalogProd.currency || 'USD').toUpperCase();
+        prodName = catalogProd.name;
+        prodCategory = catalogProd.category;
+      } else {
+        return res.status(400).json({ error: 'المنتج المطلوب غير موجود أو غير متوفر في الكتالوج' });
+      }
+    } else {
+      return res.status(400).json({ error: 'معرّف المنتج أو نوع الكاش مطلوب' });
     }
 
     const orderQty = cashType ? 1 : Math.max(1, Number(qty || 1));
@@ -3774,7 +4047,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
         statusLabel: 'غير مكتملة',
         notes: `طلب غير مكتمل - ${supplierErrMsg} (تم استرجاع الرصيد للمستخدم)`,
         customerName: dbUser.name || customerName || '',
-        customerEmail: dbUser.email || userEmail || '',
+        customerEmail: dbUser.email || authUser.email || '',
         createdAt: new Date().toISOString(),
       };
       inMemoryOrders.set(failedOrderId, failedOrderObj);
@@ -3809,7 +4082,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
               JSON.stringify({ supplierError: supplierErrMsg, status: scResponse?.status || 500, response: scData }),
               `طلب غير مكتمل - ${supplierErrMsg} (تم استرجاع الرصيد للمستخدم)`,
               dbUser.name || customerName || '',
-              dbUser.email || userEmail || '',
+              dbUser.email || authUser.email || '',
             ]
           );
         } catch (orderSaveErr) {
@@ -3860,7 +4133,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
       status: scStatus,
       rawResponse: scData,
       customerName: dbUser.name || customerName,
-      customerEmail: dbUser.email || userEmail,
+      customerEmail: dbUser.email || authUser.email,
       createdAt: new Date().toISOString(),
     };
     inMemoryOrders.set(uniqueOperationOrderId, successOrderObj);
@@ -3893,7 +4166,7 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
             scStatus,
             JSON.stringify(scData),
             dbUser.name || customerName,
-            dbUser.email || userEmail,
+            dbUser.email || authUser.email,
           ]
         );
       } catch (dbOrderErr: any) {
@@ -3928,11 +4201,20 @@ app.post('/api/sc/orders', async (req: Request, res: Response) => {
   }
 });
 
-// 4. Check Processing Orders Only (تحقق من الطلبات التي قيد المعالجة فقط)
+// 4. Check Processing Orders Only (Authenticated & User-Scoped)
 app.post('/api/sc/orders/check-processing', async (req: Request, res: Response) => {
-  const { orderIds, userId } = req.body || {};
+  const authUser = authenticateRequest(req);
+  if (!authUser) {
+    return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول أولاً' });
+  }
+
+  const isAdm = authUser.role === 'admin' || isAdminEmail(authUser.email);
+  const { orderIds } = req.body || {};
+  // Non-admins can only check their own orders
+  const effectiveUserId = isAdm ? (req.body?.userId || null) : authUser.userId;
+
   try {
-    const result = await syncAndRefundProcessingOrders(orderIds, userId);
+    const result = await syncAndRefundProcessingOrders(orderIds, effectiveUserId);
     return res.json(result);
   } catch (error: any) {
     console.error('Error in /api/sc/orders/check-processing:', error);
@@ -3963,6 +4245,21 @@ app.get('/api/sc/orders/:orderId', async (req: Request, res: Response) => {
         localDbOrder = dbMatch.rows[0];
         if (localDbOrder.sc_order_id && localDbOrder.sc_order_id !== orderId) {
           scQueryId = localDbOrder.sc_order_id;
+        }
+
+        // IDOR Check: Ensure requester is admin or order owner
+        const authUser = authenticateRequest(req);
+        const isAdm = authUser && (authUser.role === 'admin' || isAdminEmail(authUser.email));
+        if (!isAdm) {
+          if (!authUser) {
+            return res.status(401).json({ error: 'غير مصرح: يرجى تسجيل الدخول للتحقق من تفاصيل الطلب' });
+          }
+          const isOwner =
+            (localDbOrder.user_id && localDbOrder.user_id === authUser.userId) ||
+            (localDbOrder.customer_email && localDbOrder.customer_email.toLowerCase() === authUser.email.toLowerCase());
+          if (!isOwner) {
+            return res.status(403).json({ error: 'غير مصرح لك بالاطلاع على هذا الطلب' });
+          }
         }
       }
       await syncAndRefundProcessingOrders([orderId, scQueryId]);

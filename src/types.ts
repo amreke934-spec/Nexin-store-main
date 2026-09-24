@@ -63,6 +63,7 @@ export interface CustomerUser {
   role?: 'customer' | 'merchant' | 'admin';
   savedPlayerIds?: Record<string, string>;
   createdAt: string;
+  token?: string;
 }
 
 export interface OrderOptions {
@@ -188,6 +189,7 @@ export interface SupportTicket {
   subject: string;
   category: 'order' | 'deposit' | 'account' | 'technical' | 'suggestion' | 'other' | string;
   message: string;
+  images?: string[];
   status: 'pending' | 'in_progress' | 'resolved' | 'closed';
   priority?: 'normal' | 'urgent';
   adminReply?: string | null;

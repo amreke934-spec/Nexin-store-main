@@ -558,12 +558,18 @@ export default function App() {
   }, []);
 
   const handleNavigateAdmin = useCallback((targetTab?: 'stats' | 'users' | 'merchant' | 'profit' | 'order_check' | 'sync_settings' | 'deposits' | 'maintenance' | 'tickets') => {
+    const isUserAdmin = currentUser && (currentUser.role === 'admin' || ['m74321176@gmail.com', 'amreke934@gmail.com'].includes(currentUser.email?.toLowerCase() || ''));
+    if (!isUserAdmin) {
+      alert('غير مصرح لك بالدخول إلى لوحة التحكم.');
+      setActiveTab('products');
+      return;
+    }
     if (targetTab) {
       setAdminInitialTab(targetTab);
     }
     setActiveTab('admin');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+  }, [currentUser]);
 
   const handleNavigateToTracking = useCallback((orderId: string) => {
     setTrackingOrderId(orderId);
@@ -611,6 +617,10 @@ export default function App() {
   // Logout handler
   const handleLogout = useCallback(() => {
     setCurrentUser(null);
+    try {
+      localStorage.removeItem('nexen_user_session');
+      localStorage.removeItem('nexen_auth_token');
+    } catch {}
   }, []);
 
   // Delete account handler

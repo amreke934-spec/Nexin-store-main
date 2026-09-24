@@ -12,9 +12,15 @@ import {
   RefreshCw,
   Sparkles,
   AlertCircle,
+  ImageIcon,
+  Maximize2,
+  Trash2,
+  X,
+  Download,
 } from 'lucide-react';
 import { CustomerUser, SupportTicket } from '../types';
 import { fetchSupportTickets, createSupportTicket } from '../services/dbApi';
+import { compressImageFile } from '../utils/imageCompressor';
 
 interface SupportPageProps {
   currentUser: CustomerUser | null;
@@ -30,6 +36,7 @@ interface ChatMessage {
   createdAt: string;
   status?: 'sent' | 'delivered' | 'seen';
   ticketId?: string;
+  images?: string[];
 }
 
 export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack }) => {
@@ -44,6 +51,12 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
   const [guestName, setGuestName] = useState(() => localStorage.getItem('nexen_guest_name') || '');
   const [guestContact, setGuestContact] = useState(() => localStorage.getItem('nexen_guest_contact') || '');
   const [showContactForm, setShowContactForm] = useState(!currentUser);
+
+  // Chat Image Attachments
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [isProcessingChatImages, setIsProcessingChatImages] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -65,6 +78,37 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
     }
   };
 
+  // Chat image file upload
+  const handleChatImageFiles = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    if (fileArray.length === 0) return;
+
+    if (attachedImages.length + fileArray.length > 3) {
+      alert('الحد الأقصى المسموح به هو 3 صور لكل رسالة');
+    }
+
+    const availableSlots = Math.max(0, 3 - attachedImages.length);
+    const filesToProcess = fileArray.slice(0, availableSlots);
+    if (filesToProcess.length === 0) return;
+
+    setIsProcessingChatImages(true);
+    try {
+      const processed = await Promise.all(
+        filesToProcess.map((f) => compressImageFile(f, 1280, 1280, 0.82))
+      );
+      setAttachedImages((prev) => [...prev, ...processed]);
+    } catch (err: any) {
+      setErrorBanner(err?.message || 'حدث خطأ أثناء معالجة الصور');
+    } finally {
+      setIsProcessingChatImages(false);
+      if (chatFileInputRef.current) chatFileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveChatImage = (idx: number) => {
+    setAttachedImages((prev) => prev.filter((_, i) => i !== idx));
+  };
+
   // Convert support tickets into a unified chat message stream
   const convertTicketsToMessages = useCallback((ticketList: SupportTicket[]): ChatMessage[] => {
     const list: ChatMessage[] = [];
@@ -81,6 +125,7 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
         sender: 'user',
         senderName: t.userName || 'أنت',
         text: t.message,
+        images: t.images || [],
         time: new Date(t.createdAt).toLocaleTimeString('ar-EG', {
           hour: '2-digit',
           minute: '2-digit',
@@ -176,7 +221,9 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const text = inputText.trim();
-    if (!text || isSending) return;
+    if ((!text && attachedImages.length === 0) || isSending) return;
+
+    const messageText = text || 'مرفق صورة توضيحية للمشكلة';
 
     // Determine sender identity
     let senderName = currentUser?.name;
@@ -208,13 +255,16 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
     setIsSending(true);
     setErrorBanner(null);
 
+    const currentImages = [...attachedImages];
+
     // Optimistically append message to chat
     const tempId = `temp-${Date.now()}`;
     const optimisticMsg: ChatMessage = {
       id: tempId,
       sender: 'user',
       senderName: senderName || 'أنت',
-      text,
+      text: messageText,
+      images: currentImages,
       time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
       createdAt: new Date().toISOString(),
       status: 'sent',
@@ -222,6 +272,7 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
 
     setMessages((prev) => [...prev, optimisticMsg]);
     setInputText('');
+    setAttachedImages([]);
     setTimeout(() => scrollToBottom(true), 50);
 
     try {
@@ -230,10 +281,11 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
         userName: senderName || 'عميل المتجر',
         userEmail: senderEmail || 'support@nexenstore.com',
         userPhone: senderPhone || null,
-        subject: text.slice(0, 40) + (text.length > 40 ? '...' : ''),
+        subject: messageText.slice(0, 40) + (messageText.length > 40 ? '...' : ''),
         category: 'chat',
-        message: text,
+        message: messageText,
         priority: 'normal',
+        images: currentImages,
       });
 
       if (res.success && res.ticket) {
@@ -429,6 +481,28 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
                       </div>
                     )}
 
+                    {/* Attached images in message (if any) */}
+                    {msg.images && msg.images.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        {msg.images.map((imgSrc, imgIdx) => (
+                          <div
+                            key={imgIdx}
+                            onClick={() => setLightboxImage(imgSrc)}
+                            className="relative group rounded-xl overflow-hidden aspect-video cursor-pointer border border-white/20 bg-black/20"
+                          >
+                            <img
+                              src={imgSrc}
+                              alt="مرفق"
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
+                              <Maximize2 className="w-4 h-4" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <p className="whitespace-pre-wrap font-sans">{msg.text}</p>
                   </div>
 
@@ -461,7 +535,50 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
       {/* 4. BOTTOM CHAT INPUT BAR (PINNED AT BOTTOM) */}
       <div className="w-full bg-white dark:bg-[#121624] border-t border-slate-200/80 dark:border-white/10 shrink-0 p-3 sm:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-lg z-20">
         <div className="max-w-4xl w-full mx-auto">
+          {/* Previews strip if images attached */}
+          {attachedImages.length > 0 && (
+            <div className="flex items-center gap-2 pb-2.5 overflow-x-auto">
+              {attachedImages.map((imgSrc, i) => (
+                <div
+                  key={i}
+                  className="relative w-16 h-12 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-900 shadow-xs"
+                >
+                  <img src={imgSrc} alt="معاينة" className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveChatImage(i)}
+                    className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <form onSubmit={handleSendMessage} className="flex items-end gap-2 sm:gap-3">
+            <input
+              ref={chatFileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => e.target.files && handleChatImageFiles(e.target.files)}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => chatFileInputRef.current?.click()}
+              disabled={isSending || attachedImages.length >= 3}
+              className="w-12 h-12 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+              title="إرفاق صورة أو لقطة شاشة"
+            >
+              {isProcessingChatImages ? (
+                <RefreshCw className="w-5 h-5 animate-spin text-[#7F00FF]" />
+              ) : (
+                <ImageIcon className="w-5 h-5 text-[#7F00FF]" />
+              )}
+            </button>
+
             <div className="relative flex-1">
               <textarea
                 ref={inputRef}
@@ -477,7 +594,7 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
 
             <button
               type="submit"
-              disabled={!inputText.trim() || isSending}
+              disabled={(!inputText.trim() && attachedImages.length === 0) || isSending}
               className="w-12 h-12 rounded-2xl bg-[#7F00FF] hover:bg-[#6b00d6] disabled:opacity-40 disabled:hover:bg-[#7F00FF] text-white flex items-center justify-center shrink-0 shadow-md shadow-[#7F00FF]/25 active:scale-95 transition-all cursor-pointer"
               title="إرسال"
             >
@@ -490,6 +607,43 @@ export const SupportPage: React.FC<SupportPageProps> = ({ currentUser, onBack })
           </form>
         </div>
       </div>
+
+      {/* Lightbox Modal */}
+      {lightboxImage && (
+        <div
+          onClick={() => setLightboxImage(null)}
+          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-w-4xl max-h-[90vh] w-full flex flex-col items-center justify-center"
+          >
+            <div className="absolute -top-12 left-0 flex items-center gap-2">
+              <a
+                href={lightboxImage}
+                download="chat-attachment.jpg"
+                className="p-2.5 text-white/90 hover:text-white bg-white/15 hover:bg-white/25 rounded-full cursor-pointer transition-all shadow-lg flex items-center gap-1.5 text-xs font-bold"
+                title="تحميل الصورة"
+              >
+                <Download className="w-4 h-4" />
+              </a>
+              <button
+                type="button"
+                onClick={() => setLightboxImage(null)}
+                className="p-2.5 text-white/90 hover:text-white bg-white/15 hover:bg-white/25 rounded-full cursor-pointer transition-all shadow-lg"
+                title="إغلاق"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <img
+              src={lightboxImage}
+              alt="معاينة الصورة"
+              className="max-h-[82vh] max-w-full object-contain rounded-2xl shadow-2xl border border-white/10"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

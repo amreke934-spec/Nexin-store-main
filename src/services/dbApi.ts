@@ -24,6 +24,7 @@ export interface LoginUserPayload {
 export interface AuthResponse {
   success: boolean;
   user?: CustomerUser;
+  token?: string;
   orders?: OrderItem[];
   error?: string;
   requiresVerification?: boolean;
@@ -31,6 +32,32 @@ export interface AuthResponse {
   message?: string;
   cooldownSeconds?: number;
   expiresInMinutes?: number;
+}
+
+/**
+ * Retrieve securely stored JWT authentication token
+ */
+export function getStoredAuthToken(): string | null {
+  try {
+    const raw = localStorage.getItem('nexen_user_session');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.token) return parsed.token;
+    }
+  } catch {}
+  return localStorage.getItem('nexen_auth_token');
+}
+
+/**
+ * Create headers object including Authorization Bearer token if present
+ */
+export function getAuthHeaders(extraHeaders: Record<string, string> = {}): Record<string, string> {
+  const token = getStoredAuthToken();
+  const headers: Record<string, string> = { ...extraHeaders };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 /**
@@ -114,9 +141,17 @@ export async function loginUserInDb(payload: LoginUserPayload): Promise<AuthResp
         email: data.email,
       };
     }
+    const token = data.token || data.user?.token;
+    if (token) {
+      try {
+        localStorage.setItem('nexen_auth_token', token);
+      } catch {}
+    }
+    const userWithToken = data.user ? { ...data.user, token: token || data.user.token } : undefined;
     return { 
       success: true, 
-      user: data.user, 
+      user: userWithToken,
+      token,
       orders: data.orders || [],
       requiresVerification: data.requiresVerification,
       email: data.email,
@@ -141,9 +176,17 @@ export async function verifyEmailOtp(email: string, code: string): Promise<AuthR
     if (!res.ok) {
       return { success: false, error: data.error || 'فشل التحقق من الرمز' };
     }
+    const token = data.token || data.user?.token;
+    if (token) {
+      try {
+        localStorage.setItem('nexen_auth_token', token);
+      } catch {}
+    }
+    const userWithToken = data.user ? { ...data.user, token: token || data.user.token } : undefined;
     return {
       success: true,
-      user: data.user,
+      user: userWithToken,
+      token,
       orders: data.orders || [],
       message: data.message,
     };
@@ -187,7 +230,7 @@ export async function savePlayerIdToDb(userId: string, category: string, playerI
   try {
     const res = await fetch('/api/users/save-player-id', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ userId, category, playerId }),
     });
     return res.ok;
@@ -201,7 +244,9 @@ export async function savePlayerIdToDb(userId: string, category: string, playerI
  */
 export async function fetchUserProfile(idOrEmail: string): Promise<CustomerUser | null> {
   try {
-    const res = await fetch(`/api/users/profile/${encodeURIComponent(idOrEmail)}`);
+    const res = await fetch(`/api/users/profile/${encodeURIComponent(idOrEmail)}`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) return null;
     const data = await res.json();
     return data.user || null;
@@ -215,7 +260,9 @@ export async function fetchUserProfile(idOrEmail: string): Promise<CustomerUser 
  */
 export async function fetchUserOrdersFromDb(userId: string): Promise<OrderItem[]> {
   try {
-    const res = await fetch(`/api/orders?userId=${encodeURIComponent(userId)}`);
+    const res = await fetch(`/api/orders?userId=${encodeURIComponent(userId)}`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) return [];
     const data = await res.json();
     return data.orders || [];
@@ -231,7 +278,7 @@ export async function saveOrderToDb(order: OrderItem, userId?: string): Promise<
   try {
     const res = await fetch('/api/orders/save', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ order, userId }),
     });
     const data = await res.json();
@@ -248,7 +295,7 @@ export async function clearUserOrdersInDb(userId?: string, email?: string): Prom
   try {
     const res = await fetch('/api/orders/clear', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ userId, email }),
     });
     return res.ok;
@@ -278,7 +325,7 @@ export async function saveStoreSetting(key: string, value: any): Promise<boolean
   try {
     const res = await fetch('/api/settings', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ key, value }),
     });
     return res.ok;
@@ -332,7 +379,9 @@ export interface AdminOrderCheckResult {
  */
 async function fetchWithRetry(url: string, options?: RequestInit, retries = 2, delayMs = 350): Promise<Response> {
   try {
-    return await fetch(url, options);
+    const opts: RequestInit = { ...(options || {}) };
+    opts.headers = getAuthHeaders((opts.headers as Record<string, string>) || {});
+    return await fetch(url, opts);
   } catch (err) {
     if (retries > 0) {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -403,7 +452,7 @@ export async function updateAdminUser(
   try {
     const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(payload),
     });
     const data = await res.json();
@@ -423,6 +472,7 @@ export async function deleteAdminUser(userId: string): Promise<{ success: boolea
   try {
     const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -448,7 +498,7 @@ export async function createAdminUser(payload: {
   try {
     const res = await fetch('/api/admin/users/create', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(payload),
     });
     const data = await res.json();
@@ -466,7 +516,9 @@ export async function createAdminUser(payload: {
  */
 export async function checkAdminOrderDetails(orderId: string): Promise<AdminOrderCheckResult | null> {
   try {
-    const res = await fetch(`/api/admin/order-check/${encodeURIComponent(orderId)}`);
+    const res = await fetch(`/api/admin/order-check/${encodeURIComponent(orderId)}`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -496,7 +548,7 @@ export async function syncProcessingOrdersInDb(options?: {
   try {
     const res = await fetch('/api/sc/orders/check-processing', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         orderIds: options?.orderIds,
         userId: options?.userId,
@@ -592,7 +644,7 @@ export async function saveDepositMethods(methods: DepositMethod[]): Promise<{ su
   try {
     const res = await fetch('/api/deposit-methods', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ methods }),
     });
     const data = await res.json();
@@ -609,7 +661,7 @@ export async function saveDepositMethod(method: Partial<DepositMethod>): Promise
   try {
     const res = await fetch('/api/deposit-methods', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ method }),
     });
     const data = await res.json();
@@ -626,6 +678,7 @@ export async function deleteDepositMethod(id: string): Promise<{ success: boolea
   try {
     const res = await fetch(`/api/deposit-methods/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     const data = await res.json();
     return data;
@@ -646,7 +699,9 @@ export async function fetchDepositRequests(userId?: string, status?: string): Pr
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         return Array.isArray(data.requests) ? data.requests : [];
@@ -675,7 +730,7 @@ export async function submitDepositRequest(payload: {
   try {
     const res = await fetch('/api/deposit-requests', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(payload),
     });
     const data = await res.json();
@@ -700,7 +755,7 @@ export async function updateDepositRequestStatus(
   try {
     const res = await fetch(`/api/deposit-requests/${encodeURIComponent(id)}/status`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ status, rejectionReason, adminEmail }),
     });
     const data = await res.json();
@@ -725,6 +780,7 @@ export async function createSupportTicket(payload: {
   category?: string;
   message: string;
   priority?: string;
+  images?: string[];
 }): Promise<{ success: boolean; ticket?: SupportTicket; message?: string; error?: string }> {
   try {
     const res = await fetch('/api/support/tickets', {
@@ -756,7 +812,9 @@ export async function fetchSupportTickets(params?: {
     if (params?.userEmail) query.set('userEmail', params.userEmail);
     if (params?.isAdmin) query.set('isAdmin', 'true');
 
-    const res = await fetch(`/api/support/tickets?${query.toString()}`);
+    const res = await fetch(`/api/support/tickets?${query.toString()}`, {
+      headers: getAuthHeaders(),
+    });
     const data = await res.json();
     if (!res.ok) {
       return { success: false, tickets: [], error: data.error || 'فشل جلب البلاغات' };
@@ -779,7 +837,7 @@ export async function replySupportTicket(
   try {
     const res = await fetch(`/api/support/tickets/${encodeURIComponent(id)}/reply`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ adminReply, status, adminEmail }),
     });
     const data = await res.json();
@@ -802,7 +860,7 @@ export async function updateSupportTicketStatus(
   try {
     const res = await fetch(`/api/support/tickets/${encodeURIComponent(id)}/status`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ status }),
     });
     const data = await res.json();
@@ -824,6 +882,7 @@ export async function deleteSupportTicket(
   try {
     const res = await fetch(`/api/support/tickets/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     const data = await res.json();
     if (!res.ok) {

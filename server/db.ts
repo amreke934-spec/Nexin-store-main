@@ -184,6 +184,7 @@ const SCHEMA_DEFINITIONS: TableDefinition[] = [
       { name: 'subject', type: 'VARCHAR(255)', nullable: false, default: "''" },
       { name: 'category', type: 'VARCHAR(50)', default: "'other'" },
       { name: 'message', type: 'TEXT', nullable: false, default: "''" },
+      { name: 'images', type: 'JSONB', default: "'[]'" },
       { name: 'status', type: 'VARCHAR(50)', default: "'pending'" },
       { name: 'priority', type: 'VARCHAR(50)', default: "'normal'" },
       { name: 'admin_reply', type: 'TEXT' },

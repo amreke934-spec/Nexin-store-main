@@ -1,5 +1,6 @@
 import { MerchantInfo, Product, CreateOrderPayload, DynamicFieldConfig, OrderItem } from '../types';
 import { getProductServiceType } from '../utils/productUtils';
+import { getAuthHeaders } from './dbApi';
 
 export const DEFAULT_API_KEY = 'sc_c2zhyaCv-3FtC-H7ds-XNLD-6ndNSUaZIpdf';
 
@@ -254,9 +255,9 @@ export function formatCurrencyDisplay(amount: number, currency: string = 'USD'):
  */
 export async function fetchMerchantInfo(apiKey?: string): Promise<{ data: MerchantInfo | null; error?: string; raw?: any }> {
   try {
-    const headers: Record<string, string> = {
+    const headers: Record<string, string> = getAuthHeaders({
       'X-Api-Key': apiKey || DEFAULT_API_KEY,
-    };
+    });
 
     const res = await fetch('/api/sc/me', { headers });
     const json = await res.json().catch(() => null);
@@ -562,12 +563,10 @@ export async function createNewOrder(
   currentBalance?: number;
 }> {
   try {
-    const headers: Record<string, string> = {
+    const headers: Record<string, string> = getAuthHeaders({
       'Content-Type': 'application/json',
-    };
-    if (apiKey) {
-      headers['X-Api-Key'] = apiKey;
-    }
+      ...(apiKey ? { 'X-Api-Key': apiKey } : {}),
+    });
 
     const res = await fetch('/api/sc/orders', {
       method: 'POST',
@@ -639,10 +638,9 @@ export async function checkOrdersStatus(
       return { success: false, error: 'يرجى إدخال رقم الطلب للاستعلام' };
     }
 
-    const headers: Record<string, string> = {};
-    if (apiKey) {
-      headers['X-Api-Key'] = apiKey;
-    }
+    const headers: Record<string, string> = getAuthHeaders(
+      apiKey ? { 'X-Api-Key': apiKey } : {}
+    );
 
     const res = await fetch(`/api/sc/orders/${encodeURIComponent(cleanIds)}`, { headers });
     const json = await res.json().catch(() => null);
@@ -732,9 +730,9 @@ export async function checkProcessingOrdersOnly(
       };
     }
 
-    const headers: Record<string, string> = {
+    const headers: Record<string, string> = getAuthHeaders({
       'Content-Type': 'application/json',
-    };
+    });
     if (options?.apiKey) {
       headers['X-Api-Key'] = options.apiKey;
     }
@@ -801,7 +799,8 @@ export async function getScApiKeyStatus(): Promise<{
   allowManualOrders?: boolean;
 }> {
   try {
-    const res = await fetch('/api/sc/api-key');
+    const headers = getAuthHeaders();
+    const res = await fetch('/api/sc/api-key', { headers });
     const data = await res.json();
     return data;
   } catch {
@@ -821,9 +820,10 @@ export async function updateScApiKey(apiKey: string): Promise<{
   status?: number;
 }> {
   try {
+    const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch('/api/sc/api-key', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ apiKey }),
     });
     const data = await res.json();
@@ -877,7 +877,8 @@ export interface TriggerSyncResponse {
  */
 export async function getScSyncSettings(): Promise<SyncSettingsData> {
   try {
-    const res = await fetch('/api/sc/sync/status');
+    const headers = getAuthHeaders();
+    const res = await fetch('/api/sc/sync/status', { headers });
     const data = await res.json();
     return {
       intervalMinutes: data.intervalMinutes ?? 60,
@@ -911,9 +912,10 @@ export async function saveScSyncSettings(payload: {
   autoSyncEnabled?: boolean;
 }): Promise<{ success: boolean; message: string; settings?: SyncSettingsData; error?: string }> {
   try {
+    const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch('/api/sc/sync/settings', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
     });
     const data = await res.json();
@@ -931,9 +933,10 @@ export async function saveScSyncSettings(payload: {
  */
 export async function triggerScSyncNow(): Promise<TriggerSyncResponse> {
   try {
+    const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch('/api/sc/sync/now', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
     });
     const data = await res.json();
     return data;

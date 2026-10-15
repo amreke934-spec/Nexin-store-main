@@ -26,10 +26,23 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Build APK Direct
+      - name: Build APK
         run: |
-          cd "تطبيق فلاتر"
+          TARGET_DIR=""
+          if [ -d "تطبيق فلاتر" ]; then
+            TARGET_DIR="تطبيق فلاتر"
+          elif [ -d "flutter_app" ]; then
+            TARGET_DIR="flutter_app"
+          fi
+
+          if [ -n "$TARGET_DIR" ]; then
+            cd "$TARGET_DIR"
+          fi
+
           flutter pub get
+          if [ ! -d "android" ]; then
+            flutter create . --platforms=android
+          fi
           flutter build apk --release
 
       - name: Upload APK Artifact

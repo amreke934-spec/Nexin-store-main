@@ -28,19 +28,13 @@ jobs:
 
       - name: Build APK
         run: |
-          # العثور على المجلد الذي يحتوي على pubspec.yaml
-          FLUTTER_DIR=$(find . -maxdepth 2 -name "pubspec.yaml" -exec dirname {} \;)
-          echo "Flutter directory found at: $FLUTTER_DIR"
-          cd "$FLUTTER_DIR"
-          
+          cd "تطبيق فلاتر"
           flutter pub get
-          if [ ! -d "android" ]; then
-            flutter create . --platforms=android --project-name=nexin_store
-          fi
           flutter build apk --release --no-tree-shake-icons
+          cp build/app/outputs/flutter-apk/app-release.apk ../app-release.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: NexinStore-Android-Release-APK
-          path: '**/build/app/outputs/flutter-apk/app-release.apk'
+          path: app-release.apk

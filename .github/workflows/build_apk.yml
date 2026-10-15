@@ -4,13 +4,11 @@ on:
   push:
     branches:
       - main
-      - master
       - رئيسي
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Android Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -22,89 +20,27 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          cache: true
 
-      - name: Verify Flutter Installation
+      - name: Build APK
         run: |
-          flutter --version
-          flutter doctor -v
-
-      - name: Get Dependencies & Prepare Android
-        run: |
-          set -e
-          if [ -d "تطبيق فلاتر" ]; then
-            cd "تطبيق فلاتر"
-          elif [ -d "flutter_app" ]; then
-            cd "flutter_app"
-          fi
-
-          echo "=== 1. Getting Flutter Dependencies ==="
+          # العثور على المجلد الذي يحتوي على pubspec.yaml
+          FLUTTER_DIR=$(find . -maxdepth 2 -name "pubspec.yaml" -exec dirname {} \;)
+          echo "Flutter directory found at: $FLUTTER_DIR"
+          cd "$FLUTTER_DIR"
+          
           flutter pub get
-
-          echo "=== 2. Checking Android Platform Files ==="
           if [ ! -d "android" ]; then
-            echo "Android folder missing. Generating Android files with Flutter CLI..."
-            cp pubspec.yaml pubspec.yaml.bak
-            flutter create . --platforms=android --project-name=nexin_store --org=com.nexin.store
-            cp pubspec.yaml.bak pubspec.yaml
-            rm -f pubspec.yaml.bak
-            echo "Android platform files created successfully."
-          else
-            echo "Android platform files exist."
+            flutter create . --platforms=android --project-name=nexin_store
           fi
-
-          # Ensure required network permissions exist in AndroidManifest.xml
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-            if ! grep -q "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml; then
-              sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>' android/app/src/main/AndroidManifest.xml
-              echo "Added network permissions to AndroidManifest.xml"
-            fi
-          fi
-
-      - name: Build APK Release
-        run: |
-          set -e
-          if [ -d "تطبيق فلاتر" ]; then
-            cd "تطبيق فلاتر"
-          elif [ -d "flutter_app" ]; then
-            cd "flutter_app"
-          fi
-
-          echo "=== Building APK Release ==="
           flutter build apk --release --no-tree-shake-icons
-
-          echo "=== Build Output Directory Check ==="
-          ls -la build/app/outputs/flutter-apk/ || true
-
-      - name: Prepare and Verify APK Path
-        run: |
-          echo "=== Verifying APK at target location ==="
-          mkdir -p "تطبيق فلاتر/build/app/outputs/flutter-apk"
-          if [ ! -f "تطبيق فلاتر/build/app/outputs/flutter-apk/app-release.apk" ]; then
-            echo "Target APK file not found at exact path. Searching for generated APK..."
-            FOUND_APK=$(find . -name "app-release.apk" -o -name "*release*.apk" | grep -v "symbols" | head -n 1)
-            if [ -n "$FOUND_APK" ] && [ -f "$FOUND_APK" ]; then
-              echo "Found APK at: $FOUND_APK. Copying to target path..."
-              cp "$FOUND_APK" "تطبيق فلاتر/build/app/outputs/flutter-apk/app-release.apk"
-            fi
-          fi
-
-          if [ -f "تطبيق فلاتر/build/app/outputs/flutter-apk/app-release.apk" ]; then
-            echo "SUCCESS: APK is ready at: تطبيق فلاتر/build/app/outputs/flutter-apk/app-release.apk"
-            ls -lh "تطبيق فلاتر/build/app/outputs/flutter-apk/app-release.apk"
-          else
-            echo "Searching all built APK files in repository:"
-            find . -name "*.apk" || true
-          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: NexinStore-Android-Release-APK
-          path: تطبيق فلاتر/build/app/outputs/flutter-apk/app-release.apk
+          path: '**/build/app/outputs/flutter-apk/app-release.apk'

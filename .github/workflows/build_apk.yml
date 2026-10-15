@@ -1,0 +1,104 @@
+name: Build Nexin Store Flutter APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'flutter_app/**'
+      - '.github/workflows/build_apk.yml'
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - 'flutter_app/**'
+  workflow_dispatch:
+    inputs:
+      build_split_per_abi:
+        description: 'بناء نسخ مخصصة لكل معالج (Split per ABI: arm64, armeabi-v7a)'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Android Release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK (Temurin 17)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+          cache-key: 'flutter-:os:-:channel:-:version:-:arch:-:hash:'
+          cache-path: '${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:'
+
+      - name: Print Flutter & Dart Environment
+        run: |
+          flutter doctor -v
+          flutter --version
+
+      - name: Ensure Android Project Scaffolding
+        working-directory: flutter_app
+        run: |
+          if [ ! -d "android" ]; then
+            echo "مجلس الأندرويد غير موجود، جاري إنشاء ملفات إعدادات الأندرويد..."
+            flutter create . --project-name nexin_store --org com.nexinstore.app --platforms android
+          else
+            echo "مجلد الأندرويد متوفر مسبقاً."
+          fi
+
+      - name: Install Flutter Dependencies
+        working-directory: flutter_app
+        run: flutter pub get
+
+      - name: Build Universal Release APK
+        working-directory: flutter_app
+        run: |
+          echo "بدء بناء ملف APK الشامل (Universal Release APK)..."
+          flutter build apk --release
+
+      - name: Build Split-per-ABI APKs (Optional)
+        if: ${{ github.event.inputs.build_split_per_abi == 'true' }}
+        working-directory: flutter_app
+        run: |
+          echo "بناء نسخ APK منفصلة حسب المعمارية..."
+          flutter build apk --release --split-per-abi
+
+      - name: Organize APK Files for Export
+        working-directory: flutter_app
+        run: |
+          mkdir -p final_apk
+          if [ -f "build/app/outputs/flutter-apk/app-release.apk" ]; then
+            cp build/app/outputs/flutter-apk/app-release.apk final_apk/NexinStore-release.apk
+          fi
+          # نسخ أي ملفات APK إضافية (مثل النسخ المقسمة في حال تشغيلها)
+          find build/app/outputs/flutter-apk/ -maxdepth 1 -name "*.apk" -exec cp {} final_apk/ \;
+          echo "قائمة ملفات الـ APK الجاهزة للتحميل:"
+          ls -lh final_apk/
+
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NexinStore-Android-Release-APK
+          path: flutter_app/final_apk/*.apk
+          if-no-files-found: error
+          retention-days: 30

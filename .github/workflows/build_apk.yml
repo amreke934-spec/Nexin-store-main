@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - main
+      - master
       - رئيسي
   workflow_dispatch:
 
 jobs:
   build:
+    name: Build Android Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -20,34 +22,84 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          cache: true
 
-      - name: Build APK
+      - name: Verify Flutter Installation
         run: |
-          TARGET_DIR=""
+          flutter --version
+          flutter doctor -v
+
+      - name: Prepare Workspace & Android Platform
+        run: |
+          set -e
+          echo "=== 1. Checking Flutter project path ==="
           if [ -d "تطبيق فلاتر" ]; then
-            TARGET_DIR="تطبيق فلاتر"
+            SRC_DIR="تطبيق فلاتر"
           elif [ -d "flutter_app" ]; then
-            TARGET_DIR="flutter_app"
+            SRC_DIR="flutter_app"
+          elif [ -f "pubspec.yaml" ]; then
+            SRC_DIR="."
+          else
+            echo "Error: Flutter project directory not found!"
+            ls -la
+            exit 1
           fi
+          echo "Found Flutter project at: '$SRC_DIR'"
 
-          if [ -n "$TARGET_DIR" ]; then
-            cd "$TARGET_DIR"
-          fi
+          # Create a clean ASCII workspace without spaces to avoid Gradle and AAPT2 path bugs on Linux
+          BUILD_DIR="flutter_build_app"
+          rm -rf "$BUILD_DIR"
+          mkdir -p "$BUILD_DIR"
+          cp -r "$SRC_DIR"/* "$BUILD_DIR"/
 
-          flutter pub get
+          cd "$BUILD_DIR"
+
+          echo "=== 2. Check and Generate Android Platform ==="
           if [ ! -d "android" ]; then
-            flutter create . --platforms=android
+            echo "Android folder is missing. Generating Android platform files with Flutter CLI..."
+            cp pubspec.yaml pubspec.yaml.bak
+            flutter create . --platforms=android --project-name=nexin_store --org=com.nexin.store
+            cp pubspec.yaml.bak pubspec.yaml
+            rm -f pubspec.yaml.bak
+            echo "Android platform successfully generated."
+          else
+            echo "Android folder already exists."
           fi
-          flutter build apk --release
+
+          # Ensure INTERNET and network permissions are declared in AndroidManifest
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            if ! grep -q "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml; then
+              sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>' android/app/src/main/AndroidManifest.xml
+              echo "Added INTERNET permissions to AndroidManifest.xml"
+            fi
+          fi
+
+          echo "=== 3. Resolving Dependencies ==="
+          flutter pub get
+
+      - name: Build APK Release
+        run: |
+          set -e
+          cd flutter_build_app
+
+          echo "=== Building APK Release ==="
+          flutter build apk --release --no-tree-shake-icons
+
+          echo "=== Build Complete ==="
+          ls -la build/app/outputs/flutter-apk/ || true
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: NexinStore-Android-Release-APK
           path: |
-            **/build/app/outputs/flutter-apk/app-release.apk
+            flutter_build_app/build/app/outputs/flutter-apk/app-release.apk
+            flutter_build_app/build/app/outputs/apk/release/app-release.apk
+            **/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
